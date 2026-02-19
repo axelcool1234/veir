@@ -22,6 +22,7 @@ deriving BEq, Hashable
 -- =============================== DataFlowAnalysis ============================== --
 -- `Dynamic` is ALWAYS `DataFlowContext`; panic if this invariant is broken.
 structure DataFlowAnalysis where
+  private mk ::
   initDyn : OperationPtr -> Dynamic -> IRContext -> Dynamic
   visitDyn : ProgramPoint -> Dynamic -> IRContext -> Dynamic
 -- =============================================================================== --
@@ -49,6 +50,7 @@ def BaseAnalysisState.onUpdate (state : BaseAnalysisState) (workList : WorkList)
 
 -- `valueDyn` stores the concrete state object. `onUpdateDyn` expects `(valueDyn, dfCtxDyn)`.
 structure AnalysisState where
+  private mk ::
   valueDyn : Dynamic
   onUpdateDyn : Dynamic -> Dynamic -> Dynamic
 -- =============================================================================== --
@@ -67,7 +69,12 @@ def DataFlowContext.empty : DataFlowContext :=
 instance : Inhabited DataFlowContext where
   default := DataFlowContext.empty
 
-private def asDataFlowContext! (ctxDyn : Dynamic) : DataFlowContext :=
+private unsafe def asDataFlowContextImpl (ctxDyn : Dynamic) : DataFlowContext :=
+  let ((_, obj) : Lean.Name × NonScalar) := unsafeCast ctxDyn 
+  unsafeCast obj 
+
+@[implemented_by asDataFlowContextImpl]
+private opaque asDataFlowContext (ctxDyn : Dynamic) : DataFlowContext :=
   match ctxDyn.get? DataFlowContext with
   | some dfCtx =>
     dfCtx
@@ -83,21 +90,21 @@ namespace DataFlowAnalysis
 
 def init (analysis : DataFlowAnalysis) (top : OperationPtr) (dfCtx : DataFlowContext)
     (irCtx : IRContext) : DataFlowContext :=
-  asDataFlowContext!
+  asDataFlowContext
     (analysis.initDyn top (Dynamic.mk dfCtx) irCtx)
 
 def visit (analysis : DataFlowAnalysis) (point : ProgramPoint) (dfCtx : DataFlowContext)
     (irCtx : IRContext) : DataFlowContext :=
-  asDataFlowContext!
+  asDataFlowContext
     (analysis.visitDyn point (Dynamic.mk dfCtx) irCtx)
 
 def new
     (init : OperationPtr -> DataFlowContext -> IRContext -> DataFlowContext)
     (visit : ProgramPoint -> DataFlowContext -> IRContext -> DataFlowContext) : DataFlowAnalysis :=
   { initDyn := fun top dfCtxDyn irCtx =>
-      Dynamic.mk (init top (asDataFlowContext! dfCtxDyn) irCtx)
+      Dynamic.mk (init top (asDataFlowContext dfCtxDyn) irCtx)
     visitDyn := fun point dfCtxDyn irCtx =>
-      Dynamic.mk (visit point (asDataFlowContext! dfCtxDyn) irCtx)
+      Dynamic.mk (visit point (asDataFlowContext dfCtxDyn) irCtx)
   }
 
 end DataFlowAnalysis
@@ -105,7 +112,7 @@ end DataFlowAnalysis
 namespace AnalysisState
 
 def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext) : DataFlowContext :=
-  asDataFlowContext!
+  asDataFlowContext
     (state.onUpdateDyn state.valueDyn (Dynamic.mk dfCtx))
 
 def new (value : Impl) [TypeName Impl] [Update Impl DataFlowContext] : AnalysisState :=
@@ -113,10 +120,10 @@ def new (value : Impl) [TypeName Impl] [Update Impl DataFlowContext] : AnalysisS
     onUpdateDyn := fun valueDyn dfCtxDyn =>
       match valueDyn.get? Impl with
       | some value =>
-        let dfCtx := asDataFlowContext! dfCtxDyn
+        let dfCtx := asDataFlowContext dfCtxDyn
         Dynamic.mk (Update.onUpdate value dfCtx)
       | none =>
-        Dynamic.mk (panic! s!"AnalysisState.onUpdateDyn: expected value of type {TypeName.typeName Impl}, got {valueDyn.typeName}" : DataFlowContext)
+        Dynamic.mk (panic! s!"expected value of type {TypeName.typeName Impl}, got {valueDyn.typeName}" : DataFlowContext)
   }
 
 def getValue? (state : AnalysisState) (Impl : Type u) [TypeName Impl] : Option Impl :=
