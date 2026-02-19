@@ -1,11 +1,9 @@
 module
 
 public import Std.Data.HashMap
-public import Std.Data.HashSet
 public import Init.Data.Queue
 public import Veir.IR.Basic
 
-open Std(HashSet)
 open Std(HashMap)
 open Std(Queue)
 
@@ -18,165 +16,134 @@ inductive ProgramPoint where
 
 inductive LatticeAnchor
   | ProgramPoint
-  | ValuePtr 
+  | ValuePtr
 deriving BEq, Hashable
 
--- =============================== DataFlowAnalysis ============================== -- 
--- NEVER use this type directly, use `DataFlowAnalysis` which provides a proof that
--- `dfCtx` is always of type `DataFlowContext`
-structure RawDataFlowAnalysis where 
-  dfCtx : Type u -- Always `DataFlowContext`
-  init : OperationPtr -> dfCtx -> IRContext -> dfCtx
-  visit : ProgramPoint -> dfCtx -> IRContext -> dfCtx
+-- =============================== DataFlowAnalysis ============================== --
+-- `Dynamic` is ALWAYS `DataFlowContext`; panic if this invariant is broken.
+structure DataFlowAnalysis where
+  initDyn : OperationPtr -> Dynamic -> IRContext -> Dynamic
+  visitDyn : ProgramPoint -> Dynamic -> IRContext -> Dynamic
+-- =============================================================================== --
 
-structure DataFlowAnalysisPtr where
-  id: Nat
-
-instance : Coe DataFlowAnalysisPtr Nat where
-  coe ptr := ptr.id
--- =============================================================================== -- 
-
--- ================================== WorkList =================================== -- 
--- A queued item stores a program point and the index of the analysis to run.
-@[expose] def WorkItem := ProgramPoint × DataFlowAnalysisPtr
+-- ================================== WorkList =================================== --
+-- A queued item stores a program point and the analysis to run.
+@[expose] def WorkItem := ProgramPoint × DataFlowAnalysis
 @[expose] def WorkList := Queue WorkItem
--- =============================================================================== -- 
+-- =============================================================================== --
 
--- ================================ AnalysisState ================================ -- 
--- Lattice Elements are stored in structures that implement the `Update` typeclass.
--- These structures extend `BaseAnalysisState` along storing with anything else it needs.
--- `AnalysisState` is used to allow for dynamic dispatch (runtime polymorphism).
+-- ================================ AnalysisState ================================ --
+-- Lattice elements are stored in structures that implement the `Update` typeclass.
 class Update (State : Type u) (Ctx : Type v) where
   onUpdate : State -> Ctx -> Ctx
 
 structure BaseAnalysisState where
   anchor : LatticeAnchor
-  dependents : Array WorkItem 
+  dependents : Array WorkItem
 
 def BaseAnalysisState.onUpdate (state : BaseAnalysisState) (workList : WorkList) : WorkList := Id.run do
-  let mut workList := workList 
+  let mut workList := workList
   for workItem in state.dependents do
     workList := workList.enqueue workItem
-  workList  
+  workList
 
--- NEVER use this type directly, use `AnalysisState` which provides a proof that
--- `dfCtx` is always of type `DataFlowContext`
-structure RawAnalysisState where -- record-of-functions style
-  impl : Type u -- struct that extends `BaseAnalysisState` and contains some extra data
-  dfCtx : Type v -- Always `DataFlowContext`
-  value : impl
-  onUpdate : Update impl dfCtx
+-- `valueDyn` stores the concrete state object. `onUpdateDyn` expects `(valueDyn, dfCtxDyn)`.
+structure AnalysisState where
+  valueDyn : Dynamic
+  onUpdateDyn : Dynamic -> Dynamic -> Dynamic
+-- =============================================================================== --
 
--- =============================================================================== -- 
-
--- =============================== DataFlowContext =============================== -- 
-structure DataFlowContext where 
-  lattice : HashMap LatticeAnchor RawAnalysisState
+-- =============================== DataFlowContext =============================== --
+structure DataFlowContext where
+  lattice : HashMap LatticeAnchor AnalysisState
   workList : WorkList
+deriving TypeName
 
 def DataFlowContext.empty : DataFlowContext :=
   { lattice := ∅
     workList := .empty
   }
 
+instance : Inhabited DataFlowContext where
+  default := DataFlowContext.empty
+
+private def asDataFlowContext! (ctxDyn : Dynamic) : DataFlowContext :=
+  match ctxDyn.get? DataFlowContext with
+  | some dfCtx =>
+    dfCtx
+  | none =>
+    panic! s!"expected DataFlowContext, got {ctxDyn.typeName}"
+
 instance : Coe DataFlowContext WorkList where
   coe dfCtx := dfCtx.workList
 
--- =============================================================================== -- 
-
--- ========================== DataFlowContext Wrappers =========================== -- 
--- Wrapper proving that a `RawDataFlowAnalysis` is specialized to `DataFlowContext`.
-structure DataFlowAnalysis where
-  val : RawDataFlowAnalysis
-  hdfCtx : val.dfCtx = DataFlowContext
+-- =============================================================================== --
 
 namespace DataFlowAnalysis
 
-def init (analysis : DataFlowAnalysis) (top : OperationPtr) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext := by
-  cases analysis with
-  | mk val hdfCtx =>
-    cases val with
-    | mk _ init _ =>
-      cases hdfCtx
-      exact init top dfCtx irCtx
+def init (analysis : DataFlowAnalysis) (top : OperationPtr) (dfCtx : DataFlowContext)
+    (irCtx : IRContext) : DataFlowContext :=
+  asDataFlowContext!
+    (analysis.initDyn top (Dynamic.mk dfCtx) irCtx)
 
-def visit (analysis : DataFlowAnalysis) (point : ProgramPoint) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext := by
-  cases analysis with
-  | mk val hdfCtx =>
-    cases val with
-    | mk _ _ visit =>
-      cases hdfCtx
-      exact visit point dfCtx irCtx
-
-def toRaw (analysis : DataFlowAnalysis) : RawDataFlowAnalysis :=
-  analysis.val
+def visit (analysis : DataFlowAnalysis) (point : ProgramPoint) (dfCtx : DataFlowContext)
+    (irCtx : IRContext) : DataFlowContext :=
+  asDataFlowContext!
+    (analysis.visitDyn point (Dynamic.mk dfCtx) irCtx)
 
 def new
     (init : OperationPtr -> DataFlowContext -> IRContext -> DataFlowContext)
     (visit : ProgramPoint -> DataFlowContext -> IRContext -> DataFlowContext) : DataFlowAnalysis :=
-  { val := { dfCtx := DataFlowContext 
-             init := init
-             visit := visit }
-    hdfCtx := rfl
+  { initDyn := fun top dfCtxDyn irCtx =>
+      Dynamic.mk (init top (asDataFlowContext! dfCtxDyn) irCtx)
+    visitDyn := fun point dfCtxDyn irCtx =>
+      Dynamic.mk (visit point (asDataFlowContext! dfCtxDyn) irCtx)
   }
 
 end DataFlowAnalysis
 
--- Wrapper proving that a `RawAnalysisState` is specialized to `DataFlowContext`.
-structure AnalysisState where
-  val : RawAnalysisState
-  hdfCtx : val.dfCtx = DataFlowContext
-
 namespace AnalysisState
 
-def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext) : DataFlowContext := by
-  cases state with
-  | mk val hdfCtx =>
-    cases val with
-    | mk Impl _ value onUpdate =>
-      cases hdfCtx
-      letI : Update Impl DataFlowContext := onUpdate
-      exact Update.onUpdate value dfCtx
+def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext) : DataFlowContext :=
+  asDataFlowContext!
+    (state.onUpdateDyn state.valueDyn (Dynamic.mk dfCtx))
 
-def toRaw (state : AnalysisState) : RawAnalysisState :=
-  state.val
-
-def new (value : Impl) [Update Impl DataFlowContext] : AnalysisState :=
-  { val := { impl := Impl
-             dfCtx := DataFlowContext
-             value := value
-             onUpdate := inferInstance }
-    hdfCtx := rfl
+def new (value : Impl) [TypeName Impl] [Update Impl DataFlowContext] : AnalysisState :=
+  { valueDyn := Dynamic.mk value
+    onUpdateDyn := fun valueDyn dfCtxDyn =>
+      match valueDyn.get? Impl with
+      | some value =>
+        let dfCtx := asDataFlowContext! dfCtxDyn
+        Dynamic.mk (Update.onUpdate value dfCtx)
+      | none =>
+        Dynamic.mk (panic! s!"AnalysisState.onUpdateDyn: expected value of type {TypeName.typeName Impl}, got {valueDyn.typeName}" : DataFlowContext)
   }
 
-end AnalysisState
--- =============================================================================== -- 
+def getValue? (state : AnalysisState) (Impl : Type u) [TypeName Impl] : Option Impl :=
+  state.valueDyn.get? Impl
 
--- =============================== Fixpoint Solver =============================== -- 
-partial def run (analyses : Array DataFlowAnalysis) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext :=
+end AnalysisState
+
+-- =============================== Fixpoint Solver =============================== --
+partial def run (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext :=
   match dfCtx.workList.dequeue? with
   | none =>
     dfCtx
-  | some ((point, dataFlowAnalysisPtr), workList) =>
+  | some ((point, analysis), workList) =>
     let dfCtx := { dfCtx with workList := workList }
-    let dfCtx :=
-      if h : dataFlowAnalysisPtr < analyses.size then
-        let analysis := analyses[dataFlowAnalysisPtr.id]'h
-        analysis.visit point dfCtx irCtx
-      else
-        dbg_trace "Invalid DataFlowAnalysisPtr!"
-        dfCtx
-    run analyses dfCtx irCtx
+    let dfCtx := analysis.visit point dfCtx irCtx
+    run dfCtx irCtx
 
-def fixpointSolve (top: OperationPtr) (analyses : Array DataFlowAnalysis) (irCtx : IRContext) : DataFlowContext := Id.run do
+def fixpointSolve (top : OperationPtr) (analyses : Array DataFlowAnalysis)
+    (irCtx : IRContext) : DataFlowContext := Id.run do
   -- init
   let mut dfCtx := DataFlowContext.empty
   for analysis in analyses do
     dfCtx := analysis.init top dfCtx irCtx
 
   -- run
-  run analyses dfCtx irCtx
+  run dfCtx irCtx
 
--- =============================================================================== -- 
+-- =============================================================================== --
 
 end Veir
