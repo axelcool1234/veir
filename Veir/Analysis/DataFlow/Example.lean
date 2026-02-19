@@ -54,10 +54,10 @@ instance : Update LatticeState DataFlowContext where
 -- =============================================================================== -- 
 
 -- ===================== Example `DataFlowAnalysis` Children ===================== -- 
-def ConstantAnalysis.init (top : OperationPtr) (ctx : DataFlowContext) : DataFlowContext :=
+def ConstantAnalysis.init (top : OperationPtr) (dataFlowCtx : DataFlowContext) (ctx : IRContext) : DataFlowContext :=
   sorry
 
-def ConstantAnalysis.visit (point : ProgramPoint) (ctx : DataFlowContext) : DataFlowContext :=
+def ConstantAnalysis.visit (point : ProgramPoint) (dataFlowCtx : DataFlowContext) (ctx : IRContext) : DataFlowContext :=
   sorry
 
 def ConstantAnalysis := DataFlowAnalysis.new ConstantAnalysis.init ConstantAnalysis.visit
