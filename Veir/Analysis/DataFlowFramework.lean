@@ -13,10 +13,11 @@ namespace Veir
 
 inductive ProgramPoint where
   | OperationPtr (op : OperationPtr)
+deriving BEq, Hashable
 
 inductive LatticeAnchor
-  | ProgramPoint
-  | ValuePtr
+  | ProgramPoint (point : ProgramPoint)
+  | ValuePtr (value : ValuePtr)
 deriving BEq, Hashable
 
 -- =============================== DataFlowAnalysis ============================== --
@@ -36,7 +37,7 @@ structure DataFlowAnalysis where
 -- ================================ AnalysisState ================================ --
 -- Lattice elements are stored in structures that implement the `Update` typeclass.
 class Update (State : Type u) (Ctx : Type v) where
-  onUpdate : State -> Ctx -> Ctx
+  onUpdate : State -> Ctx -> IRContext -> Ctx
 
 structure BaseAnalysisState where
   anchor : LatticeAnchor
@@ -52,7 +53,8 @@ def BaseAnalysisState.onUpdate (state : BaseAnalysisState) (workList : WorkList)
 structure AnalysisState where
   private mk ::
   valueDyn : Dynamic
-  onUpdateDyn : Dynamic -> Dynamic -> Dynamic
+  -- State -> DataFlowContext -> IRContext -> DataFlowContext
+  onUpdateDyn : Dynamic -> Dynamic -> IRContext -> Dynamic
 -- =============================================================================== --
 
 -- =============================== DataFlowContext =============================== --
@@ -115,16 +117,16 @@ end DataFlowAnalysis
 
 namespace AnalysisState
 
-def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext) : DataFlowContext :=
-  asDataFlowContext (state.onUpdateDyn state.valueDyn (asDynamic dfCtx))
+def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext :=
+  asDataFlowContext (state.onUpdateDyn state.valueDyn (asDynamic dfCtx) irCtx)
 
 def new (value : Impl) [TypeName Impl] [Update Impl DataFlowContext] : AnalysisState :=
   { valueDyn := Dynamic.mk value
-    onUpdateDyn := fun valueDyn dfCtxDyn =>
+    onUpdateDyn := fun valueDyn dfCtxDyn irCtx =>
       match valueDyn.get? Impl with
       | some value =>
         let dfCtx := asDataFlowContext dfCtxDyn
-        asDynamic (Update.onUpdate value dfCtx)
+        asDynamic (Update.onUpdate value dfCtx irCtx)
       | none =>
         asDynamic (panic! s!"expected value of type {TypeName.typeName Impl}, got {valueDyn.typeName}" : DataFlowContext)
   }
