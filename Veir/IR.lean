@@ -7,3 +7,4 @@ public import Veir.IR.GetSet
 public import Veir.IR.Grind
 public import Veir.IR.InBounds
 public import Veir.IR.WellFormed
+public import Veir.IR.Dominance
