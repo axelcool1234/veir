@@ -7,13 +7,13 @@ public section
 namespace Veir
 
 class Join (α : Type) where
-  join : α -> α -> α  
+  join : α -> α -> α
 
 class Meet (α : Type) where
-  meet : α -> α -> α  
+  meet : α -> α -> α
 
 structure ConstantValue where
-  constant: Option Nat
+  constant : Option Nat
 deriving BEq
 
 instance : Join ConstantValue where
@@ -21,15 +21,16 @@ instance : Join ConstantValue where
     if lhs.constant == rhs.constant then
       lhs
     else
-      ⟨ none ⟩
+      ⟨none⟩
 
--- ====================== Example `AnalysisState` Children ======================= -- 
+-- ====================== Example `AnalysisState` Children ======================= --
 structure AbstractSparseLatticeState extends BaseAnalysisState where
   useDefSubscribers : Array DataFlowAnalysis
 
 instance : Update AbstractSparseLatticeState DataFlowContext where
-  onUpdate (state: AbstractSparseLatticeState) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext := Id.run do
-    let mut dfCtx := {dfCtx with workList := state.onUpdate dfCtx}
+  onUpdate (state : AbstractSparseLatticeState) (dfCtx : DataFlowContext)
+      (irCtx : IRContext) : DataFlowContext := Id.run do
+    let mut dfCtx := { dfCtx with workList := state.onUpdate dfCtx }
     match state.anchor with
     | .ValuePtr value =>
       let mut maybeUse := value.getFirstUse! irCtx
@@ -61,12 +62,16 @@ def ConstantLatticeState.new (value : ValuePtr) (constant : ConstantValue) : Ana
        useDefSubscribers := #[]
        value := constant } : ConstantLatticeState)
 
--- =============================================================================== -- 
+-- =============================================================================== --
 
--- ===================== Example `DataFlowAnalysis` Children ===================== -- 
+-- ===================== Example `DataFlowAnalysis` Children ===================== --
 namespace ConstantAnalysis
 
 abbrev OpCode.constant : Nat := 1
+abbrev OpCode.addi : Nat := 2
+abbrev OpCode.muli : Nat := 4
+abbrev OpCode.andi : Nat := 5
+abbrev OpCode.subi : Nat := 6
 
 def unknownConstant : ConstantValue :=
   ⟨none⟩
@@ -114,7 +119,8 @@ def opResults (op : OperationPtr) (irCtx : IRContext) : Array ValuePtr := Id.run
     values := values.push (ValuePtr.opResult (op.getResult i))
   values
 
-partial def blockArguments (block : BlockPtr) (irCtx : IRContext) (acc : Array ValuePtr := #[]) : Array ValuePtr := Id.run do
+partial def blockArguments (block : BlockPtr) (irCtx : IRContext)
+    (acc : Array ValuePtr := #[]) : Array ValuePtr := Id.run do
   let mut acc := acc
   for i in [0:block.getNumArguments! irCtx] do
     acc := acc.push (ValuePtr.blockArgument (block.getArgument i))
@@ -145,6 +151,22 @@ def getKnownConstant? (value : ValuePtr) (dfCtx : DataFlowContext) : Option Nat 
   let constantState ← state.getValue? ConstantLatticeState
   constantState.value.constant
 
+def foldBinaryOp? (op : OperationPtr) (dfCtx : DataFlowContext) (irCtx : IRContext)
+    (f : Nat → Nat → Option Nat) : Option ConstantValue :=
+  if op.getNumResults! irCtx == 0 then
+    none
+  else if op.getNumOperands! irCtx != 2 then
+    none
+  else
+    let lhsValue := op.getOperand! irCtx 0
+    let rhsValue := op.getOperand! irCtx 1
+    match getKnownConstant? lhsValue dfCtx, getKnownConstant? rhsValue dfCtx with
+    | some lhs, some rhs =>
+      match f lhs rhs with
+      | some folded => some ⟨some folded⟩
+      | none => none
+    | _, _ => none
+
 def foldSubiConstants? (lhs rhs : Nat) : Option Nat :=
   -- Without width/sign info, avoid unsound underflow behavior from Nat subtraction.
   if rhs ≤ lhs then
@@ -152,7 +174,8 @@ def foldSubiConstants? (lhs rhs : Nat) : Option Nat :=
   else
     none
 
-def visit (point : ProgramPoint) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext := Id.run do
+def visit (point : ProgramPoint) (dfCtx : DataFlowContext)
+    (irCtx : IRContext) : DataFlowContext := Id.run do
   match point with
   | .OperationPtr op =>
     match (op.get! irCtx).opType with
@@ -161,21 +184,30 @@ def visit (point : ProgramPoint) (dfCtx : DataFlowContext) (irCtx : IRContext) :
         propagateConstant (ValuePtr.opResult (op.getResult 0)) (fromOperationProperty op irCtx) dfCtx irCtx
       else
         dfCtx
-    | 6 => -- arith.subi
-      if op.getNumResults! irCtx == 0 || op.getNumOperands! irCtx != 2 then
+    | OpCode.addi =>
+      match foldBinaryOp? op dfCtx irCtx (fun lhs rhs => some (lhs + rhs)) with
+      | some constant =>
+        propagateConstant (ValuePtr.opResult (op.getResult 0)) constant dfCtx irCtx
+      | none =>
         setOpAndRegionValuesToUnknown op dfCtx irCtx
-      else
-        let lhsValue := op.getOperand! irCtx 0
-        let rhsValue := op.getOperand! irCtx 1
-        match getKnownConstant? lhsValue dfCtx, getKnownConstant? rhsValue dfCtx with
-        | some lhs, some rhs =>
-          match foldSubiConstants? lhs rhs with
-          | some folded =>
-            propagateConstant (ValuePtr.opResult (op.getResult 0)) ⟨some folded⟩ dfCtx irCtx
-          | none =>
-            setOpAndRegionValuesToUnknown op dfCtx irCtx
-        | _, _ =>
-          setOpAndRegionValuesToUnknown op dfCtx irCtx
+    | OpCode.muli =>
+      match foldBinaryOp? op dfCtx irCtx (fun lhs rhs => some (lhs * rhs)) with
+      | some constant =>
+        propagateConstant (ValuePtr.opResult (op.getResult 0)) constant dfCtx irCtx
+      | none =>
+        setOpAndRegionValuesToUnknown op dfCtx irCtx
+    | OpCode.andi =>
+      match foldBinaryOp? op dfCtx irCtx (fun lhs rhs => some (Nat.land lhs rhs)) with
+      | some constant =>
+        propagateConstant (ValuePtr.opResult (op.getResult 0)) constant dfCtx irCtx
+      | none =>
+        setOpAndRegionValuesToUnknown op dfCtx irCtx
+    | OpCode.subi =>
+      match foldBinaryOp? op dfCtx irCtx foldSubiConstants? with
+      | some constant =>
+        propagateConstant (ValuePtr.opResult (op.getResult 0)) constant dfCtx irCtx
+      | none =>
+        setOpAndRegionValuesToUnknown op dfCtx irCtx
     | _ =>
       setOpAndRegionValuesToUnknown op dfCtx irCtx
 
@@ -190,17 +222,17 @@ partial def enqueueOpPostOrder
     let region := (op.getRegion! irCtx i).get! irCtx
     if h : region.firstBlock.isSome then
       let firstBlock := region.firstBlock.get h
-      dfCtx := enqueueBlockList firstBlock dfCtx irCtx  
+      dfCtx := enqueueBlockList firstBlock dfCtx irCtx
   visit (.OperationPtr op) dfCtx irCtx
 
 partial def enqueueOpList
     (op : OperationPtr)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext) : DataFlowContext :=
-  let dfCtx := enqueueOpPostOrder op dfCtx irCtx 
+  let dfCtx := enqueueOpPostOrder op dfCtx irCtx
   if h : (op.get! irCtx).next.isSome then
     let nextOp := (op.get! irCtx).next.get h
-    enqueueOpList nextOp dfCtx irCtx  
+    enqueueOpList nextOp dfCtx irCtx
   else
     dfCtx
 
@@ -211,26 +243,27 @@ partial def enqueueBlockList
   let dfCtx :=
     if h : (block.get! irCtx).firstOp.isSome then
       let firstOp := (block.get! irCtx).firstOp.get h
-      enqueueOpList firstOp dfCtx irCtx 
+      enqueueOpList firstOp dfCtx irCtx
     else
       dfCtx
   if h : (block.get! irCtx).next.isSome then
     let nextBlock := (block.get! irCtx).next.get h
-    enqueueBlockList nextBlock dfCtx irCtx 
+    enqueueBlockList nextBlock dfCtx irCtx
   else
     dfCtx
 
 end
 
 def init (top : OperationPtr) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext :=
-  enqueueOpPostOrder top dfCtx irCtx 
+  enqueueOpPostOrder top dfCtx irCtx
 
 end ConstantAnalysis
 
-def ConstantAnalysis := 
-  DataFlowAnalysis.new 
+def ConstantAnalysis :=
+  DataFlowAnalysis.new
   ConstantAnalysis.init
   ConstantAnalysis.visit
--- =============================================================================== -- 
+-- =============================================================================== --
 
 end Veir
+
