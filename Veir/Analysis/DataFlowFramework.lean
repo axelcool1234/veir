@@ -60,7 +60,13 @@ structure AnalysisState where
 
 -- =============================== DataFlowContext =============================== --
 structure DataFlowContext where
-  lattice : HashMap LatticeAnchor AnalysisState
+  /-- 
+  Maps a program location to a set of states for that location, 
+  each belonging to a different analysis.
+  -/
+  lattice : HashMap LatticeAnchor (HashMap Lean.Name AnalysisState)
+
+  -- queue for the fixpoint solver
   workList : WorkList
 deriving TypeName
 
@@ -143,8 +149,16 @@ namespace DataFlowContext
 
 def getState? (dfCtx : DataFlowContext) (anchor : LatticeAnchor)
     (State : Type) [TypeName State] : Option State := do
-  let state ← dfCtx.lattice.get? anchor
+  let states ← dfCtx.lattice.get? anchor
+  let state ← states.get? (TypeName.typeName State)  
   AnalysisState.getValue? state State
+
+def insertState
+    (dfCtx : DataFlowContext)
+    (anchor : LatticeAnchor)
+    (state : AnalysisState) : DataFlowContext :=
+  let states := (dfCtx.lattice.getD anchor ∅).insert state.valueDyn.typeName state
+  { dfCtx with lattice := dfCtx.lattice.insert anchor states }
 
 end DataFlowContext
 -- =============================================================================== --

@@ -18,22 +18,26 @@ structure KnownConstant where
   value : Data.LLVM.Int bitwidth
 deriving BEq
 
+-- Constant domain (this is the lattice element for this domain)
 inductive ConstantValue where
   | top
   | bottom
   | constant (value : KnownConstant)
 deriving BEq
 
+/-- Alias for the top element: value is unknown or conflicting. -/
 def ConstantValue.unknown : ConstantValue :=
   .top
-
+/-- Alias for the bottom element: no information has been learned yet. -/
 def ConstantValue.uninitialized : ConstantValue :=
   .bottom
 
+/-- Build a constant lattice element from an integer at the given bitwidth. -/
 def ConstantValue.ofInt (bitwidth : Nat) (value : Int) : ConstantValue :=
   .constant { bitwidth := bitwidth
               value := .val (BitVec.ofInt bitwidth value) }
 
+-- For this analysis, only join is relevant.
 instance : Join ConstantValue where
   join (lhs rhs : ConstantValue) : ConstantValue :=
     match lhs, rhs with
@@ -51,6 +55,10 @@ instance : Join ConstantValue where
 structure AbstractSparseLatticeState extends BaseAnalysisState where
   useDefSubscribers : Array DataFlowAnalysis
 
+/--
+When the lattice gets updated, propagate an update to users of the value
+using its use-def chain to subscribed analyses.
+-/
 instance : Update AbstractSparseLatticeState DataFlowContext where
   onUpdate (state : AbstractSparseLatticeState) (dfCtx : DataFlowContext)
       (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
@@ -79,6 +87,7 @@ instance : Update ConstantLatticeState DataFlowContext where
       dfCtx
       irCtx
 
+/-- Create a new typed analysis state for a value anchor. -/
 def ConstantLatticeState.new (value : ValuePtr) (constant : ConstantValue) : AnalysisState :=
   AnalysisState.new
     ({ anchor := .ValuePtr value
@@ -91,49 +100,39 @@ def ConstantLatticeState.new (value : ValuePtr) (constant : ConstantValue) : Ana
 -- ===================== Example `DataFlowAnalysis` Children ===================== --
 namespace ConstantAnalysis
 
+/-- 
+Get the lattice element at the specified anchor
+Note, if there is no state at the specified anchor, the default is bottom!
+-/
 def getLatticeValue (dfCtx : DataFlowContext) (anchor : LatticeAnchor) : ConstantValue :=
   match dfCtx.getState? anchor ConstantLatticeState with
   | some state =>
     state.value
   | none =>
-    if dfCtx.lattice[anchor]?.isSome then
-      -- Another analysis owns this anchor in the current single-map representation.
-      -- TODO: DataFlowContext.lattice should be a map of maps, where each map is for a specific type.
-      -- FIX: Then we wouldn't have this issue!
-      ConstantValue.top
-    else
-      ConstantValue.bottom
+    ConstantValue.bottom
 
-def fromOperationProperty (op : OperationPtr) (irCtx : IRContext OpCode) : ConstantValue :=
-  let intAttr := (op.getProperties! irCtx .arith_constant).value
-  ConstantValue.ofInt intAttr.type.bitwidth intAttr.value
-
+/--
+Join a new fact into the value's lattice state and propagate updates when it changes.
+Bottom is kept sparse (no inserted map entry). This is because an anchor with no entry is by default bottom.
+-/
 def propagateConstant (value : ValuePtr) (constant : ConstantValue)
     (dfCtx : DataFlowContext) (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
   let anchor : LatticeAnchor := .ValuePtr value
   let oldValue := getLatticeValue dfCtx anchor
-  let joined := Join.join oldValue constant
-  if joined == oldValue then
+  let newValue := Join.join oldValue constant
+  -- No change
+  if newValue == oldValue then
     dfCtx
+  -- Join result updates the lattice element
   else
-    match dfCtx.getState? anchor ConstantLatticeState with
-    | some oldState =>
-      let nextState : ConstantLatticeState := { oldState with value := joined }
-      let state := AnalysisState.new nextState
-      let mut dfCtx := { dfCtx with lattice := dfCtx.lattice.insert anchor state }
-      dfCtx := state.onUpdate dfCtx irCtx
-      dfCtx
-    | none =>
-      if dfCtx.lattice[anchor]?.isSome || joined == .bottom then
-        -- Do not clobber another analysis entry; also keep bottom sparse.
-        -- TODO: Like said previously, this should be handled by having DataFlowContext.lattice be a map of maps
-        dfCtx
-      else
-        let state := ConstantLatticeState.new value joined
-        let mut dfCtx := { dfCtx with lattice := dfCtx.lattice.insert anchor state }
-        dfCtx := state.onUpdate dfCtx irCtx
-        dfCtx
+    let state := match dfCtx.getState? anchor ConstantLatticeState with
+    | some oldState => AnalysisState.new { oldState with value := newValue } 
+    | none => ConstantLatticeState.new value newValue
+    let mut dfCtx := dfCtx.insertState anchor state
+    dfCtx := state.onUpdate dfCtx irCtx
+    dfCtx
 
+/-- Mark all provided SSA values as unknown (top). -/
 def setAllToUnknownConstants (values : Array ValuePtr) (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
   let mut dfCtx := dfCtx
@@ -141,12 +140,14 @@ def setAllToUnknownConstants (values : Array ValuePtr) (dfCtx : DataFlowContext)
     dfCtx := propagateConstant value ConstantValue.unknown dfCtx irCtx
   dfCtx
 
+/-- Collect all result values of an operation as `ValuePtr.opResult`. -/
 def opResults (op : OperationPtr) (irCtx : IRContext OpCode) : Array ValuePtr := Id.run do
   let mut values : Array ValuePtr := #[]
   for i in [0:op.getNumResults! irCtx] do
     values := values.push (ValuePtr.opResult (op.getResult i))
   values
 
+/-- Recursively collect block arguments across a block list. -/
 partial def blockArguments (block : BlockPtr) (irCtx : IRContext OpCode)
     (acc : Array ValuePtr := #[]) : Array ValuePtr := Id.run do
   let mut acc := acc
@@ -158,6 +159,7 @@ partial def blockArguments (block : BlockPtr) (irCtx : IRContext OpCode)
   | none =>
     acc
 
+/-- Collect all arguments from every block in a region. -/
 def regionArguments (region : RegionPtr) (irCtx : IRContext OpCode) : Array ValuePtr :=
   match (region.get! irCtx).firstBlock with
   | some firstBlock =>
@@ -165,6 +167,7 @@ def regionArguments (region : RegionPtr) (irCtx : IRContext OpCode) : Array Valu
   | none =>
     #[]
 
+/-- Set all operation results and nested region block arguments to unknown (top). -/
 def setOpAndRegionValuesToUnknown (op : OperationPtr) (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
   let mut dfCtx := setAllToUnknownConstants (opResults op irCtx) dfCtx irCtx
@@ -173,6 +176,7 @@ def setOpAndRegionValuesToUnknown (op : OperationPtr) (dfCtx : DataFlowContext)
     dfCtx := setAllToUnknownConstants (regionArguments region irCtx) dfCtx irCtx
   dfCtx
 
+/-- Get a constant for a value if one is known in the lattice. -/
 def getKnownConstant? (value : ValuePtr) (dfCtx : DataFlowContext) : Option KnownConstant := do
   let anchor : LatticeAnchor := .ValuePtr value
   match getLatticeValue dfCtx anchor with
@@ -181,12 +185,16 @@ def getKnownConstant? (value : ValuePtr) (dfCtx : DataFlowContext) : Option Know
   | _ =>
     none
 
+/--
+Fold a binary operation on known constants when bitwidths agree.
+Returns `none` if widths mismatch or folding yields no value.
+-/
 def foldKnownBinary?
     (lhs rhs : KnownConstant)
     (f : {w : Nat} -> Data.LLVM.Int w -> Data.LLVM.Int w -> Option (Data.LLVM.Int w))
     : Option KnownConstant :=
   if h : lhs.bitwidth = rhs.bitwidth then
-    let rhsValue : Data.LLVM.Int lhs.bitwidth := Data.LLVM.Int.cast rhs.value (Eq.symm h)
+    let rhsValue := Data.LLVM.Int.cast rhs.value (Eq.symm h)
     match f lhs.value rhsValue with
     | some folded =>
       some { bitwidth := lhs.bitwidth, value := folded }
@@ -195,6 +203,10 @@ def foldKnownBinary?
   else
     none
 
+/--
+Try to fold a binary op from operand lattice facts.
+Only folds when the op has exactly two operands and one result.
+-/
 def foldBinaryOp? (op : OperationPtr) (dfCtx : DataFlowContext) (irCtx : IRContext OpCode)
     (f : {w : Nat} -> Data.LLVM.Int w -> Data.LLVM.Int w -> Option (Data.LLVM.Int w))
     : Option ConstantValue :=
@@ -212,6 +224,10 @@ def foldBinaryOp? (op : OperationPtr) (dfCtx : DataFlowContext) (irCtx : IRConte
       | none => none
     | _, _ => none
 
+/--
+Transfer function for constant propagation.
+Known foldable ops propagate constants; otherwise outputs/region args become unknown.
+-/
 def visit (point : ProgramPoint) (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
   match point with
@@ -219,7 +235,11 @@ def visit (point : ProgramPoint) (dfCtx : DataFlowContext)
     match (op.get! irCtx).opType with
     | .arith_constant =>
       if op.getNumResults! irCtx > 0 then
-        propagateConstant (ValuePtr.opResult (op.getResult 0)) (fromOperationProperty op irCtx) dfCtx irCtx
+        -- Read the `arith.constant` attribute and convert it into the lattice domain.
+        -- Then propagate it
+        let intAttr := (op.getProperties! irCtx .arith_constant).value
+        let constant := ConstantValue.ofInt intAttr.type.bitwidth intAttr.value
+        propagateConstant (ValuePtr.opResult (op.getResult 0)) constant dfCtx irCtx
       else
         dfCtx
     | .arith_addi =>
@@ -266,6 +286,7 @@ def visit (point : ProgramPoint) (dfCtx : DataFlowContext)
 
 -- Enqueue one operation after recursively enqueueing everything nested in its regions.
 mutual
+/-- Post-order traversal helper: visit nested regions before the current operation. -/
 partial def enqueueOpPostOrder
     (op : OperationPtr)
     (dfCtx : DataFlowContext)
@@ -278,6 +299,7 @@ partial def enqueueOpPostOrder
       dfCtx := enqueueBlockList firstBlock dfCtx irCtx
   visit (.OperationPtr op) dfCtx irCtx
 
+/-- Traverse sibling operations in a block list. -/
 partial def enqueueOpList
     (op : OperationPtr)
     (dfCtx : DataFlowContext)
@@ -289,6 +311,7 @@ partial def enqueueOpList
   else
     dfCtx
 
+/-- Traverse sibling blocks and enqueue each block's operation list. -/
 partial def enqueueBlockList
     (block : BlockPtr)
     (dfCtx : DataFlowContext)
@@ -307,11 +330,13 @@ partial def enqueueBlockList
 
 end
 
+/-- Analysis initialization: seed the solver by traversing from the top op. -/
 def init (top : OperationPtr) (dfCtx : DataFlowContext) (irCtx : IRContext OpCode) : DataFlowContext :=
   enqueueOpPostOrder top dfCtx irCtx
 
 end ConstantAnalysis
 
+/-- Pack the constant analysis transfer/init functions into a `DataFlowAnalysis`. -/
 def ConstantAnalysis :=
   DataFlowAnalysis.new
   ConstantAnalysis.init
