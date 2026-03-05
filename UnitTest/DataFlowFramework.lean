@@ -53,9 +53,6 @@ def checkExpectedLattice
 
   true
 
-abbrev ConstantValuePropagationAnalysis : DataFlowAnalysis :=
-  ConstantAnalysis
-
 def runConstantValuePropagation
     (mlir : String)
     (expected : Array (String × ConstantValue)) : Bool :=
@@ -63,118 +60,112 @@ def runConstantValuePropagation
   | none =>
     false
   | some (top, parserState) =>
-    let dfCtx := fixpointSolve top #[ConstantValuePropagationAnalysis] parserState.ctx
+    let dfCtx := fixpointSolve top #[ConstantAnalysis] parserState.ctx
     checkExpectedLattice dfCtx parserState.values expected
 
 def testAddiAllConstant : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
-  %b = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = 5 : i32 }> : () -> i32\n\
+  %b = \"arith.constant\"() <{ value = 7 : i32 }> : () -> i32\n\
   %c = \"arith.addi\"(%a, %b) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("b", ⟨some 0⟩)
-     , ("c", ⟨some 0⟩)
+    #[ ("a", ConstantValue.ofInt 32 5)
+     , ("b", ConstantValue.ofInt 32 7)
+     , ("c", ConstantValue.ofInt 32 12)
      ]
 
 def testMuliAllConstant : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
-  %b = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = 3 : i32 }> : () -> i32\n\
+  %b = \"arith.constant\"() <{ value = 2 : i32 }> : () -> i32\n\
   %c = \"arith.muli\"(%a, %b) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("b", ⟨some 0⟩)
-     , ("c", ⟨some 0⟩)
+    #[ ("a", ConstantValue.ofInt 32 3)
+     , ("b", ConstantValue.ofInt 32 2)
+     , ("c", ConstantValue.ofInt 32 6)
      ]
 
 def testAndiAllConstant : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
-  %b = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = 27 : i32 }> : () -> i32\n\
+  %b = \"arith.constant\"() <{ value = 3 : i32 }> : () -> i32\n\
   %c = \"arith.andi\"(%a, %b) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("b", ⟨some 0⟩)
-     , ("c", ⟨some 0⟩)
+    #[ ("a", ConstantValue.ofInt 32 27)
+     , ("b", ConstantValue.ofInt 32 3)
+     , ("c", ConstantValue.ofInt 32 3)
      ]
 
 def testSubiAllConstant : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
-  %b = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = 12 : i32 }> : () -> i32\n\
+  %b = \"arith.constant\"() <{ value = 37 : i32 }> : () -> i32\n\
   %c = \"arith.subi\"(%a, %b) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("b", ⟨some 0⟩)
-     , ("c", ⟨some 0⟩)
+    #[ ("a", ConstantValue.ofInt 32 12)
+     , ("b", ConstantValue.ofInt 32 37)
+     , ("c", ConstantValue.ofInt 32 (-25))
      ]
 
 def testAddiUnknownOperand : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = -3 : i32 }> : () -> i32\n\
   %u = \"test.test\"() : () -> i32\n\
   %c = \"arith.addi\"(%a, %u) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("u", ⟨none⟩)
-     , ("c", ⟨none⟩)
+    #[ ("a", ConstantValue.ofInt 32 (-3))
+     , ("u", ConstantValue.unknown)
+     , ("c", ConstantValue.unknown)
      ]
 
 def testMuliUnknownOperand : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = 7 : i32 }> : () -> i32\n\
   %u = \"test.test\"() : () -> i32\n\
   %c = \"arith.muli\"(%a, %u) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("u", ⟨none⟩)
-     , ("c", ⟨none⟩)
+    #[ ("a", ConstantValue.ofInt 32 7)
+     , ("u", ConstantValue.unknown)
+     , ("c", ConstantValue.unknown)
      ]
 
 def testAndiUnknownOperand : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = -2 : i32 }> : () -> i32\n\
   %u = \"test.test\"() : () -> i32\n\
   %c = \"arith.andi\"(%a, %u) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("u", ⟨none⟩)
-     , ("c", ⟨none⟩)
+    #[ ("a", ConstantValue.ofInt 32 (-2))
+     , ("u", ConstantValue.unknown)
+     , ("c", ConstantValue.unknown)
      ]
 
 def testSubiUnknownOperand : Bool :=
   let mlir := "\"builtin.module\"() ({\n\
 ^bb0:\n\
-  %a = \"arith.constant\"() : () -> i32\n\
+  %a = \"arith.constant\"() <{ value = 0 : i32 }> : () -> i32\n\
   %u = \"test.test\"() : () -> i32\n\
   %c = \"arith.subi\"(%a, %u) : (i32, i32) -> i32\n\
 }) : () -> ()"
   runConstantValuePropagation mlir
-    #[ ("a", ⟨some 0⟩)
-     , ("u", ⟨none⟩)
-     , ("c", ⟨none⟩)
+    #[ ("a", ConstantValue.ofInt 32 0)
+     , ("u", ConstantValue.unknown)
+     , ("c", ConstantValue.unknown)
      ]
-
-def testSubiFoldNoUnderflow : Bool :=
-  ConstantAnalysis.foldSubiConstants? 7 3 == some 4
-
-def testSubiFoldUnderflowUnknown : Bool :=
-  ConstantAnalysis.foldSubiConstants? 0 1 == none
 
 #assert! testAddiAllConstant
 #assert! testMuliAllConstant
@@ -184,6 +175,3 @@ def testSubiFoldUnderflowUnknown : Bool :=
 #assert! testMuliUnknownOperand
 #assert! testAndiUnknownOperand
 #assert! testSubiUnknownOperand
-#assert! testSubiFoldNoUnderflow
-#assert! testSubiFoldUnderflowUnknown
-

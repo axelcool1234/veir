@@ -3,6 +3,7 @@ module
 public import Std.Data.HashMap
 public import Init.Data.Queue
 public import Veir.IR.Basic
+public import Veir.Properties
 
 open Std(HashMap)
 open Std(Queue)
@@ -24,8 +25,8 @@ deriving BEq, Hashable
 -- `Dynamic` is ALWAYS `DataFlowContext`; panic if this invariant is broken.
 structure DataFlowAnalysis where
   private mk ::
-  initDyn : OperationPtr -> Dynamic -> IRContext -> Dynamic
-  visitDyn : ProgramPoint -> Dynamic -> IRContext -> Dynamic
+  initDyn : OperationPtr -> Dynamic -> IRContext OpCode -> Dynamic
+  visitDyn : ProgramPoint -> Dynamic -> IRContext OpCode -> Dynamic
 -- =============================================================================== --
 
 -- ================================== WorkList =================================== --
@@ -37,7 +38,7 @@ structure DataFlowAnalysis where
 -- ================================ AnalysisState ================================ --
 -- Lattice elements are stored in structures that implement the `Update` typeclass.
 class Update (State : Type u) (Ctx : Type v) where
-  onUpdate : State -> Ctx -> IRContext -> Ctx
+  onUpdate : State -> Ctx -> IRContext OpCode -> Ctx
 
 structure BaseAnalysisState where
   anchor : LatticeAnchor
@@ -54,7 +55,7 @@ structure AnalysisState where
   private mk ::
   valueDyn : Dynamic
   -- State -> DataFlowContext -> IRContext -> DataFlowContext
-  onUpdateDyn : Dynamic -> Dynamic -> IRContext -> Dynamic
+  onUpdateDyn : Dynamic -> Dynamic -> IRContext OpCode -> Dynamic
 -- =============================================================================== --
 
 -- =============================== DataFlowContext =============================== --
@@ -97,16 +98,16 @@ instance : Coe DataFlowContext WorkList where
 namespace DataFlowAnalysis
 
 def init (analysis : DataFlowAnalysis) (top : OperationPtr) (dfCtx : DataFlowContext)
-    (irCtx : IRContext) : DataFlowContext :=
+    (irCtx : IRContext OpCode) : DataFlowContext :=
   asDataFlowContext (analysis.initDyn top (asDynamic dfCtx) irCtx)
 
 def visit (analysis : DataFlowAnalysis) (point : ProgramPoint) (dfCtx : DataFlowContext)
-    (irCtx : IRContext) : DataFlowContext :=
+    (irCtx : IRContext OpCode) : DataFlowContext :=
   asDataFlowContext (analysis.visitDyn point (asDynamic dfCtx) irCtx)
 
 def new
-    (init : OperationPtr -> DataFlowContext -> IRContext -> DataFlowContext)
-    (visit : ProgramPoint -> DataFlowContext -> IRContext -> DataFlowContext) : DataFlowAnalysis :=
+    (init : OperationPtr -> DataFlowContext -> IRContext OpCode -> DataFlowContext)
+    (visit : ProgramPoint -> DataFlowContext -> IRContext OpCode -> DataFlowContext) : DataFlowAnalysis :=
   { initDyn := fun top dfCtxDyn irCtx =>
       asDynamic (init top (asDataFlowContext dfCtxDyn) irCtx)
     visitDyn := fun point dfCtxDyn irCtx =>
@@ -117,7 +118,8 @@ end DataFlowAnalysis
 
 namespace AnalysisState
 
-def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext :=
+def onUpdate (state : AnalysisState) (dfCtx : DataFlowContext)
+    (irCtx : IRContext OpCode) : DataFlowContext :=
   asDataFlowContext (state.onUpdateDyn state.valueDyn (asDynamic dfCtx) irCtx)
 
 def new (value : Impl) [TypeName Impl] [Update Impl DataFlowContext] : AnalysisState :=
@@ -137,7 +139,7 @@ def getValue? (state : AnalysisState) (Impl : Type u) [TypeName Impl] : Option I
 end AnalysisState
 
 -- =============================== Fixpoint Solver =============================== --
-partial def run (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext :=
+partial def run (dfCtx : DataFlowContext) (irCtx : IRContext OpCode) : DataFlowContext :=
   match dfCtx.workList.dequeue? with
   | none =>
     dfCtx
@@ -147,7 +149,7 @@ partial def run (dfCtx : DataFlowContext) (irCtx : IRContext) : DataFlowContext 
     run dfCtx irCtx
 
 def fixpointSolve (top : OperationPtr) (analyses : Array DataFlowAnalysis)
-    (irCtx : IRContext) : DataFlowContext := Id.run do
+    (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
   -- init
   let mut dfCtx := DataFlowContext.empty
   for analysis in analyses do
