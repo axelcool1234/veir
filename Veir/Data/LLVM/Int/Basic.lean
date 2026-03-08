@@ -358,6 +358,59 @@ def xor {w : Nat} (x y : Int w) : Int w := Id.run do
   let val y' := y | poison
   val (x' ^^^ y')
 
+/--
+The `trunc` instruction truncates the high order bits in value and converts the
+remaining bits to `w₂`. Since the source size must be larger than the
+destination size, trunc cannot be a no-op cast. It will always truncate bits.
+
+If the `nuw` keyword is present, and any of the truncated bits are non-zero, the
+result is a poison value. If the `nsw` keyword is present, and any of the
+truncated bits are not the same as the top bit of the truncation result, the
+result is a poison value.
+-/
+def trunc {w₁ : Nat} (x : Int w₁) (w₂ : Nat) (nsw : Bool := false) (nuw : Bool := false) (_h : w₁ > w₂) : Int w₂ := Id.run do
+  let val v := x | poison
+
+  if nsw && (v.truncate w₂).signExtend w₁ ≠ v then
+    return poison
+
+  if nuw && (v.truncate w₂).zeroExtend w₁ ≠ v then
+    return poison
+
+  val (v.truncate w₂)
+
+/--
+The 'zext' instruction zero-extends its operand to the given type.
+
+The `zext` fills the high order bits of the value with zero bits until it reaches
+the size of the destination type, ty2.
+
+When `zero` extending from i1, the result will always be either 0 or 1.
+
+If the `nneg` flag is set, and the zext argument is negative, the result is a
+poison value.
+-/
+def zext {w₁ : Nat} (x : Int w₁) (w₂ : Nat) (nneg : Bool := false) (_h : w₁ < w₂) : Int w₂ := Id.run do
+  let val v := x | poison
+
+  if nneg && v.msb then
+    return poison
+
+  val (v.zeroExtend w₂)
+
+/--
+The `sext` instruction sign-extends its operand to the given type.
+
+The `sext` instruction performs a sign extension by copying the sign bit
+(highest order bit) of the value until it reaches the bit size of the type `w₂`.
+
+When sign extending from i1, the extension always results in -1 or 0.
+-/
+def sext {w₁ : Nat} (x : Int w₁) (w₂ : Nat) (_h : w₁ < w₂) : Int w₂ := Id.run do
+  let val v := x | poison
+
+  val (v.signExtend w₂)
+
 end Int
 end
 end Veir.Data.LLVM
