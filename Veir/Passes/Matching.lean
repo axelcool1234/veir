@@ -92,3 +92,11 @@ def matchSdiv (op : OperationPtr) (ctx : IRContext OpCode) : Option (ValuePtr ×
 def matchUdiv (op : OperationPtr) (ctx : IRContext OpCode) : Option (ValuePtr × ValuePtr × propertiesOf .llvm_udiv) := do
   let (op, properties) ← matchOp op ctx .llvm_udiv 2
   return (op[0]!, op[1]!, properties)
+
+def matchSrem (op : OperationPtr) (ctx : IRContext OpCode) : Option (ValuePtr × ValuePtr × propertiesOf .llvm_srem) := do
+  let (op, properties) ← matchOp op ctx .llvm_srem 2
+  return (op[0]!, op[1]!, properties)
+
+def matchUrem (op : OperationPtr) (ctx : IRContext OpCode) : Option (ValuePtr × ValuePtr × propertiesOf .llvm_urem) := do
+  let (op, properties) ← matchOp op ctx .llvm_urem 2
+  return (op[0]!, op[1]!, properties)
