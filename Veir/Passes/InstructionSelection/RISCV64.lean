@@ -524,6 +524,59 @@ def trunc (rewriter: PatternRewriter OpCode) (op: OperationPtr) :
       #[] #[] () (some $ .before op) (by sorry) (by simp) (by simp) sorry
   rewriter.replaceOp op castOp sorry sorry sorry
 
+set_option warn.sorry false in
+/-- llvm.shl -> riscv.sll -/
+def shl (rewriter: PatternRewriter OpCode) (op: OperationPtr) :
+    Option (PatternRewriter OpCode) := do
+  let some (lhs, rhs, _) := matchShl op rewriter.ctx | return rewriter
+  /- only support `i64` -/
+  let .integerType ltype := (lhs.getType! rewriter.ctx).val | return rewriter
+  if ltype.bitwidth ≠ 64 then return rewriter
+  let .integerType rtype := (rhs.getType! rewriter.ctx).val | return rewriter
+  if rtype.bitwidth ≠ 64 then return rewriter
+  let type := ((op.getResult 0).get! rewriter.ctx).type
+  let .integerType type' := type.val | rewriter
+  if type'.bitwidth ≠ 64 then return rewriter
+  /- First, cast the operands to registers -/
+  let (rewriter, lcastOp) ← rewriter.createOp (.builtin .unrealized_conversion_cast) #[RegisterType.mk] #[lhs]
+      #[] #[] () (some $ .before op) sorry (by simp) (by simp) sorry
+  let (rewriter, rcastOp) ← rewriter.createOp (.builtin .unrealized_conversion_cast) #[RegisterType.mk] #[rhs]
+      #[] #[] () (some $ .before op) sorry (by simp) (by simp) sorry
+  /- Actual `riscv.sll` -/
+  let (rewriter, mulOp) ← rewriter.createOp (.riscv .sll) #[RegisterType.mk] #[lcastOp.getResult 0, rcastOp.getResult 0]
+      #[] #[] () (some $ .before op) sorry (by simp) (by simp) sorry
+  /- Cast back result for type consistency-/
+  let (rewriter, castOp) ← rewriter.createOp (.builtin .unrealized_conversion_cast) #[type] #[mulOp.getResult 0]
+      #[] #[] () (some $ .before op) (by sorry) (by simp) (by simp) sorry
+  rewriter.replaceOp op castOp sorry sorry sorry
+
+set_option warn.sorry false in
+/-- llvm.shl -> riscv.srl -/
+def lshr (rewriter: PatternRewriter OpCode) (op: OperationPtr) :
+    Option (PatternRewriter OpCode) := do
+  let some (lhs, rhs, _) := matchLshr op rewriter.ctx | return rewriter
+  /- only support `i64` -/
+  let .integerType ltype := (lhs.getType! rewriter.ctx).val | return rewriter
+  if ltype.bitwidth ≠ 64 then return rewriter
+  let .integerType rtype := (rhs.getType! rewriter.ctx).val | return rewriter
+  if rtype.bitwidth ≠ 64 then return rewriter
+  let type := ((op.getResult 0).get! rewriter.ctx).type
+  let .integerType type' := type.val | rewriter
+  if type'.bitwidth ≠ 64 then return rewriter
+  /- First, cast the operands to registers -/
+  let (rewriter, lcastOp) ← rewriter.createOp (.builtin .unrealized_conversion_cast) #[RegisterType.mk] #[lhs]
+      #[] #[] () (some $ .before op) sorry (by simp) (by simp) sorry
+  let (rewriter, rcastOp) ← rewriter.createOp (.builtin .unrealized_conversion_cast) #[RegisterType.mk] #[rhs]
+      #[] #[] () (some $ .before op) sorry (by simp) (by simp) sorry
+  /- Actual `riscv.srl` -/
+  let (rewriter, mulOp) ← rewriter.createOp (.riscv .srl) #[RegisterType.mk] #[lcastOp.getResult 0, rcastOp.getResult 0]
+      #[] #[] () (some $ .before op) sorry (by simp) (by simp) sorry
+  /- Cast back result for type consistency-/
+  let (rewriter, castOp) ← rewriter.createOp (.builtin .unrealized_conversion_cast) #[type] #[mulOp.getResult 0]
+      #[] #[] () (some $ .before op) (by sorry) (by simp) (by simp) sorry
+  rewriter.replaceOp op castOp sorry sorry sorry
+
+
 /-! # Pass implementation -/
 
 set_option warn.sorry false in
@@ -531,7 +584,7 @@ def ISelPass.impl (ctx : { ctx' : IRContext OpCode // ctx'.WellFormed }) (op : O
     (_ : op.InBounds ctx.val) :
     ExceptT String IO { ctx' : IRContext OpCode // ctx'.WellFormed } := do
   let pattern := RewritePattern.GreedyRewritePattern #[constant, add, and, ashr, icmp, or, xor, mul,
-    sdiv, udiv, srem, urem, sext, zext, trunc]
+    sdiv, udiv, srem, urem, sext, zext, trunc, shl, lshr]
   match RewritePattern.applyInContext pattern ctx ctx.property.inBounds with
   | none => throw "Error while applying pattern rewrites"
   | some ctx => pure ⟨ctx, sorry⟩
