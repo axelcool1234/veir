@@ -153,51 +153,110 @@ def DomTreeNodePtr.setIDom! (ptr newIDom : DomTreeNodePtr) (ctx : DomContext) : 
       let ctx := ctx.modifyNode! ptr ({ · with iDom := some newIDom })
       newIDom.addChild! ptr ctx
 
-def intersect (block1 block2 : BlockPtr) (idx : HashMap BlockPtr DomTreeNodePtr) (domCtx : DomContext) : BlockPtr := Id.run do 
+/--
+Find the nearest common dominator of `block1` and `block2`.
+
+`idx` maps blocks to dominator tree nodes. Each dominator tree node stores
+its immediate dominator, so following `getIDom` walks upward in the
+dominator tree.
+
+The two cursors start at the nodes for `block1` and `block2`. On each step,
+the cursor with the smaller postorder `index` is moved upward until both
+cursors coincide. The node where they meet is the nearest common dominator
+of the two input blocks.
+-/
+def intersect
+  (block1 block2 : BlockPtr)
+  (idx : HashMap BlockPtr DomTreeNodePtr)
+  (domCtx : DomContext) : BlockPtr := Id.run do
   let mut finger1 := idx[block1]!
   let mut finger2 := idx[block2]!
   while finger1 != finger2 do
     while finger1.index < finger2.index do
-      finger1 := (finger1.getIDom! domCtx).get! 
-    while finger2.index < finger1.index do  
-      finger2 := (finger2.getIDom! domCtx).get! 
+      finger1 := (finger1.getIDom! domCtx).get!
+    while finger2.index < finger1.index do
+      finger2 := (finger2.getIDom! domCtx).get!
   return (finger1.getBlock! domCtx)
 
-/-- Constructs a dominance tree for a region.
-Uses the Cooper Harvey Kennedy algorithm.
+/--
+Traverse the region in postorder starting from the entry block and create one
+dominator tree node for each reachable block. It returns the updated `DomContext`,
+now containing the dominator tree nodes for `ptr`. It also returns the 
+`postOrderIndex`, which is a map from each reachable block to its dominator tree
+node pointer.
+
+The `index` stored in each `DomTreeNodePtr` is the block's postorder number in
+the traversal order used by the Cooper-Harvey-Kennedy algorithm.
 -/
-def RegionPtr.computeDomTree! (ptr : RegionPtr) (domCtx : DomContext) (irCtx : IRContext OpInfo) : DomContext := Id.run do
-  -- Postorder traversal of blocks, insert into DomTree (which is just an array!) 
+def RegionPtr.buildPostOrderDomTree!
+    (ptr : RegionPtr)
+    (domCtx : DomContext)
+    (irCtx : IRContext OpInfo) :
+    DomContext × HashMap BlockPtr DomTreeNodePtr := Id.run do
   let mut postOrderIndex : HashMap BlockPtr DomTreeNodePtr := {}
   let mut domCtx := domCtx.insert ptr #[]
+
   match (ptr.get! irCtx).firstBlock with
-  | none => return domCtx
+  | none =>
+      return (domCtx, postOrderIndex)
   | some entry =>
-    let mut worklist : Array (Option BlockPtr × Bool) := #[(entry, false)]
-    let mut seen : Std.HashSet BlockPtr := {}
-    while not worklist.isEmpty do
-      let (block, visited) := worklist.back!
-      worklist := worklist.pop 
-      match block with
-      | none => continue
-      | some block =>
-        if visited then 
-          postOrderIndex := postOrderIndex.insert block { region := ptr, index := (ptr.getDomTreeSize! domCtx) }
-          domCtx := ptr.newDomTreeNode! block domCtx 
-        else if seen.contains block then
-          continue
-        else
-          seen := seen.insert block
-          worklist := worklist.push (block, true) 
-          let op := (block.get! irCtx).lastOp.get!
-          for childIdx in [0 :op.getNumSuccessors! irCtx] do
-            worklist := worklist.push ((op.getSuccessor! irCtx childIdx), false)
+      let mut worklist : Array (Option BlockPtr × Bool) := #[(entry, false)]
+      let mut seen : Std.HashSet BlockPtr := {}
 
-    -- Give entry block its iDom (which is itself)
-    let entryPtr := postOrderIndex[entry]!
-    domCtx := DomContext.modifyNode! domCtx entryPtr ({ · with iDom := some entryPtr })
+      while not worklist.isEmpty do
+        let (block, visited) := worklist.back!
+        worklist := worklist.pop
 
-    -- Iterate backwards through the DomTree (reverse postorder traversal)
+        match block with
+        | none => continue
+        | some block =>
+            if visited then
+              let nodePtr := { region := ptr, index := ptr.getDomTreeSize! domCtx }
+              postOrderIndex := postOrderIndex.insert block nodePtr
+              domCtx := ptr.newDomTreeNode! block domCtx
+            else if seen.contains block then
+              continue
+            else
+              seen := seen.insert block
+              worklist := worklist.push (block, true)
+
+              let op := (block.get! irCtx).lastOp.get!
+              for childIdx in [0 : op.getNumSuccessors! irCtx] do
+                worklist := worklist.push ((op.getSuccessor! irCtx childIdx), false)
+
+      return (domCtx, postOrderIndex)
+
+/--
+Initialize the entry block of the dominator tree.
+
+In the Cooper-Harvey-Kennedy algorithm, the entry block is 
+defined to immediately dominate itself. This gives the fixed 
+point iteration a base case.
+-/
+def initializeEntryIDom!
+    (entry : BlockPtr)
+    (postOrderIndex : HashMap BlockPtr DomTreeNodePtr)
+    (domCtx : DomContext) : DomContext :=
+  let entryPtr := postOrderIndex[entry]!
+  DomContext.modifyNode! domCtx entryPtr ({ · with iDom := some entryPtr })
+
+/--
+Run the Cooper-Harvey-Kennedy fixed point iteration over
+the dominator tree.
+
+The dominator tree nodes are visited in reverse postorder
+repeatedly until no node changes its immediate dominator
+
+TODO: `domTree` is being copied here!
+TODO: Split this function up even further
+-/
+def RegionPtr.solveImmediateDominators!
+    (ptr : RegionPtr)
+    (entry : BlockPtr)
+    (postOrderIndex : HashMap BlockPtr DomTreeNodePtr)
+    (domCtx : DomContext)
+    (irCtx : IRContext OpInfo) : DomContext := Id.run do
+    let mut domCtx := domCtx
     let mut changed := true
     while changed do
       let domTree := ptr.getDomTree! domCtx
@@ -224,4 +283,24 @@ def RegionPtr.computeDomTree! (ptr : RegionPtr) (domCtx : DomContext) (irCtx : I
         if (nodePtr.getIDom! domCtx) != newIDomPtr then
           domCtx := nodePtr.setIDom! newIDomPtr domCtx
           changed := true
-    domCtx
+    return domCtx
+
+/--
+Construct the dominator tree for `ptr` using the Cooper-Harvey-Kennedy
+iterative algorithm.
+
+The computation proceeds in three phases:
+
+1. Build dominator tree nodes for all reachable blocks in postorder.
+2. Initialize the entry block so that it immediately dominates itself.
+3. Repeatedly refine each block's immediate dominator until a fixed point
+   is reached.
+-/
+def RegionPtr.computeDomTree! (ptr : RegionPtr) (domCtx : DomContext) (irCtx : IRContext OpInfo) : DomContext := Id.run do
+    let (domCtx, postOrderIndex) := ptr.buildPostOrderDomTree! domCtx irCtx
+    match (ptr.get! irCtx).firstBlock with
+    | none =>
+        return domCtx
+    | some entry =>
+        let domCtx := initializeEntryIDom! entry postOrderIndex domCtx
+        ptr.solveImmediateDominators! entry postOrderIndex domCtx irCtx
