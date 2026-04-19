@@ -46,7 +46,7 @@ instance : ToString (RuntimeValue) where
   It includes a mapping from IR values to their runtime values.
 -/
 structure InterpreterState where
-  variables : Std.HashMap ValuePtr RuntimeValue
+  variables : Std.ExtHashMap ValuePtr RuntimeValue
 
 /--
   Set the value of a variable.
@@ -61,6 +61,14 @@ def InterpreterState.setVar (state : InterpreterState) (var : ValuePtr) (val : R
 def InterpreterState.getVar? (state : InterpreterState) (var : ValuePtr)
     : Option RuntimeValue :=
   state.variables[var]?
+
+@[ext]
+theorem InterpreterState.ext {s₁ s₂ : InterpreterState} :
+    (∀ var, s₁.getVar? var = s₂.getVar? var) →
+    s₁ = s₂ := by
+  rcases s₁; rcases s₂
+  simp only [getVar?, mk.injEq]
+  grind
 
 /--
   Get the value of the operands of an operation.
@@ -91,7 +99,7 @@ def InterpreterState.setResultValues (state : InterpreterState) (ctx : IRContext
   Create an interpreter state with no variables defined.
 -/
 def InterpreterState.empty : InterpreterState :=
-  { variables := Std.HashMap.emptyWithCapacity 8 }
+  { variables := Std.ExtHashMap.emptyWithCapacity 8 }
 
 /--
   How the control flow should proceed after interpreting an operation.
