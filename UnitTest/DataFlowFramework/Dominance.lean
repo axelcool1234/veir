@@ -29,9 +29,9 @@ private def compareExpectedDominator
     | return #[s!"dominators {expected.name}: missing block label {expectedDom}"]
   let shouldProperlyDom := expectedDom ≠ expected.name
   let mut report := #[]
-  if !Veir.DominanceAnalysis.dominates expectedBlock block dfCtx irCtx then
+  if !expectedBlock.dominates block dfCtx irCtx then
     report := report.push s!"dominators {expected.name}: missing expected dominator {expectedDom}"
-  if Veir.DominanceAnalysis.properlyDominates expectedBlock block dfCtx irCtx ≠ shouldProperlyDom then
+  if expectedBlock.properlyDominates block dfCtx irCtx ≠ shouldProperlyDom then
     report := report.push
       s!"dominators {expected.name}: unexpected properlyDominates result for {expectedDom}"
   return report
@@ -49,8 +49,8 @@ private def compareObservedDominator
     (expected : ExpectedBlockDominators)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : MismatchReport := Id.run do
-  let observedByRelation := Veir.DominanceAnalysis.dominates observedBlock block dfCtx irCtx
-  let observedProperly := Veir.DominanceAnalysis.properlyDominates observedBlock block dfCtx irCtx
+  let observedByRelation := observedBlock.dominates block dfCtx irCtx
+  let observedProperly := observedBlock.properlyDominates block dfCtx irCtx
   let mut report := #[]
   if observedProperly ≠ (observedByRelation && observedBlock ≠ block) then
     report := report.push
