@@ -4,6 +4,7 @@ public import Std.Data.HashMap
 public import Init.Data.Queue
 public import Veir.IR.Basic
 public import Veir.GlobalOpInfo
+public import Veir.Analysis.DataFlow.Domains.LivenessDomain
 public import Veir.Rewriter.InsertPoint
 
 open Std (HashMap Queue)
@@ -55,6 +56,7 @@ Tags to match on for different `DataFlowAnalysis` types.
 -/
 inductive AnalysisKind where
   | dominance
+  | deadCode
 deriving BEq, Hashable, Repr, DecidableEq
 
 /--
@@ -63,6 +65,7 @@ Tags to match on for different fact types.
 inductive FactKind where
   | dominator
   | regionMetadata
+  | executable
 deriving BEq, ReflBEq, LawfulBEq, Hashable, Repr, DecidableEq
 
 abbrev WorkItem := InsertPoint × AnalysisKind
@@ -89,11 +92,19 @@ structure SparsePayload (Domain : Type) where
   latticeElement : Domain
 
 /--
+Tracks whether a control flow point or edge is executable.
+-/
+structure ExecutablePayload where
+  latticeElement : Liveness := .dead
+  subscribers : Array AnalysisKind := #[]
+
+/--
 The fact specific data stored for each fact kind.
 -/
 @[expose] def FactPayload : FactKind → Type
   | .dominator => DominatorPayload
   | .regionMetadata => RegionMetadataPayload
+  | .executable => ExecutablePayload
 
 /--
 A dataflow fact stored by the framework.
@@ -155,10 +166,38 @@ def setPostOrderIndex (fact : Fact .regionMetadata)
     (postOrderIndex : HashMap BlockPtr Nat) : Fact .regionMetadata :=
   { fact with payload := { fact.payload with postOrderIndex := postOrderIndex } }
 
+def live (fact : Fact .executable) : Bool :=
+  match fact.payload.latticeElement with
+  | .dead => false
+  | .live => true
+
+def latticeElement (fact : Fact .executable) : Liveness :=
+  fact.payload.latticeElement
+
+def subscribers (fact : Fact .executable) : Array AnalysisKind :=
+  fact.payload.subscribers
+
+def setLatticeElement (fact : Fact .executable) (latticeElement : Liveness) : Fact .executable :=
+  { fact with payload := { fact.payload with latticeElement := latticeElement } }
+
+def setSubscribers (fact : Fact .executable) (subscribers : Array AnalysisKind) : Fact .executable :=
+  { fact with payload := { fact.payload with subscribers := subscribers } }
+
+def setToLive (fact : Fact .executable) : Fact .executable :=
+  fact.setLatticeElement .live
+
+def blockContentSubscribe (fact : Fact .executable) (analysisKind : AnalysisKind) : Fact .executable :=
+  if fact.subscribers.contains analysisKind then
+    fact
+  else
+    fact.setSubscribers (fact.subscribers.push analysisKind)
+
 end Fact
 
 abbrev DominatorFact := Fact .dominator
 
 abbrev RegionMetadataFact := Fact .regionMetadata
+
+abbrev ExecutableFact := Fact .executable
 
 end Veir
