@@ -55,7 +55,7 @@ def mkDefault (kind : FactKind) [FactSpec kind] : Fact kind :=
 /--
 Run the fact kind's propagation hook.
 -/
-def propagate [FactSpec kind]
+@[expose] def propagate [FactSpec kind]
     (fact : Fact kind)
     (anchor : LatticeAnchor)
     (ctx : DataFlowContext)
@@ -145,6 +145,80 @@ def modifyFactAndPropagate (kind : FactKind) [spec : FactSpec kind]
     fact.propagate anchor ctx irCtx
   else
     ctx
+
+/-!
+## Keystone lemmas for the fact store
+
+These describe how `getFact?` reads back after a `modifyFact`. They are the
+foundation for proving facts about analysis steps (e.g. that `joinLatticeElement`
+only raises a value's abstraction). The proofs rely on `LawfulBEq`/`LawfulHashable`
+for `LatticeAnchor` and `FactKind`, which is why those carry `DecidableEq`-derived
+`BEq` instances (see `Facts.lean`).
+-/
+
+/-- Reading back the kind/anchor just written by `modifyFact` yields the updated fact. -/
+@[simp] theorem getFact?_modifyFact_self (kind : FactKind) [FactSpec kind]
+    (ctx : DataFlowContext) (anchor : LatticeAnchor) (f : Fact kind → Fact kind) :
+    (ctx.modifyFact kind anchor f).getFact? kind anchor
+      = some (f (ctx.getOrMkFact kind anchor)) := by
+  simp [modifyFact, setFact, getFact?, Std.DHashMap.get?_insert_self]
+
+/-- `modifyFact` at one anchor does not change the facts stored at any other anchor. -/
+theorem getFact?_modifyFact_of_ne (kind : FactKind) [FactSpec kind]
+    (ctx : DataFlowContext) {anchor anchor' : LatticeAnchor} (f : Fact kind → Fact kind)
+    (h : anchor' ≠ anchor) :
+    (ctx.modifyFact kind anchor f).getFact? kind anchor' = ctx.getFact? kind anchor' := by
+  have h' : anchor ≠ anchor' := Ne.symm h
+  simp [modifyFact, setFact, getFact?, Std.HashMap.getElem?_insert, h']
+
+/-- `getFact?` reads only the fact store, so equal stores give equal reads. -/
+theorem getFact?_congr (kind : FactKind) [FactSpec kind]
+    {ctx₁ ctx₂ : DataFlowContext} (anchor : LatticeAnchor)
+    (h : ctx₁.lattice = ctx₂.lattice) :
+    ctx₁.getFact? kind anchor = ctx₂.getFact? kind anchor := by
+  simp only [getFact?, h]
+
+/--
+`modifyFactAndPropagate` changes the fact store exactly like the corresponding
+`modifyFact`, *provided* the fact's `propagate` hook leaves the store alone
+(`hprop`). The propagate step only differs in the worklist, which `getFact?`
+never inspects.
+-/
+theorem modifyFactAndPropagate_lattice (kind : FactKind) [FactSpec kind]
+    (ctx : DataFlowContext) (anchor : LatticeAnchor) (f : Fact kind → Fact kind × Bool)
+    (irCtx : IRContext OpCode)
+    (hprop : ∀ (s : Fact kind) (c : DataFlowContext),
+      (s.propagate anchor c irCtx).lattice = c.lattice) :
+    (ctx.modifyFactAndPropagate kind anchor f irCtx).lattice
+      = (ctx.modifyFact kind anchor (fun _ => (f (ctx.getOrMkFact kind anchor)).1)).lattice := by
+  simp only [modifyFactAndPropagate, modifyFact]
+  split
+  · exact hprop _ _
+  · rfl
+
+/-- Reading back the kind/anchor written by `modifyFactAndPropagate` (with a
+store-preserving `propagate`) yields the updated fact. -/
+theorem getFact?_modifyFactAndPropagate_self (kind : FactKind) [FactSpec kind]
+    (ctx : DataFlowContext) (anchor : LatticeAnchor) (f : Fact kind → Fact kind × Bool)
+    (irCtx : IRContext OpCode)
+    (hprop : ∀ (s : Fact kind) (c : DataFlowContext),
+      (s.propagate anchor c irCtx).lattice = c.lattice) :
+    (ctx.modifyFactAndPropagate kind anchor f irCtx).getFact? kind anchor
+      = some (f (ctx.getOrMkFact kind anchor)).1 := by
+  rw [getFact?_congr kind anchor (modifyFactAndPropagate_lattice kind ctx anchor f irCtx hprop),
+    getFact?_modifyFact_self]
+
+/-- `modifyFactAndPropagate` (with a store-preserving `propagate`) does not change
+facts at other anchors. -/
+theorem getFact?_modifyFactAndPropagate_of_ne (kind : FactKind) [FactSpec kind]
+    (ctx : DataFlowContext) {anchor anchor' : LatticeAnchor} (f : Fact kind → Fact kind × Bool)
+    (irCtx : IRContext OpCode)
+    (hprop : ∀ (s : Fact kind) (c : DataFlowContext),
+      (s.propagate anchor c irCtx).lattice = c.lattice)
+    (h : anchor' ≠ anchor) :
+    (ctx.modifyFactAndPropagate kind anchor f irCtx).getFact? kind anchor' = ctx.getFact? kind anchor' := by
+  rw [getFact?_congr kind anchor' (modifyFactAndPropagate_lattice kind ctx anchor f irCtx hprop)]
+  exact getFact?_modifyFact_of_ne kind ctx _ h
 
 end DataFlowContext
 

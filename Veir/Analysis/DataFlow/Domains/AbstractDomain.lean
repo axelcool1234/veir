@@ -126,4 +126,37 @@ class AbstractDomain (AbstractValue : Type) (ConcreteValue : Type) [LE AbstractV
   -/
   γ_monotone (a b : AbstractValue) : a ≤ b → γ a ⊆ γ b
 
+/--
+A lattice has *finite height* when there is a `Nat`-valued `rank` that strictly
+increases along the order: `a < b → rank a < rank b` (written here over `≤` and
+`≠` to avoid depending on a separate `LT` instance).
+
+This is the ascending chain condition in measure form. Any strictly increasing
+chain `a₀ < a₁ < ⋯` has `rank a₀ < rank a₁ < ⋯`, a strictly increasing sequence
+of naturals, so it is finite. This is exactly the ingredient that turns
+monotone fixpoint iteration into a *terminating* computation (see
+`Veir.MonotoneFramework.iterateFrom`).
+-/
+class FiniteHeight (α : Type) [LE α] where
+  /-- A rank that strictly increases along the order. -/
+  rank : α → Nat
+  /-- A uniform upper bound on the rank; the lattice height. -/
+  maxRank : Nat
+  /-- Every element's rank is bounded by `maxRank`. -/
+  rank_le_maxRank (a : α) : rank a ≤ maxRank
+  /-- Going strictly up in the order strictly increases the rank. -/
+  rank_lt_of_lt {a b : α} : a ≤ b → a ≠ b → rank a < rank b
+
+namespace FiniteHeight
+
+variable {α : Type} [LE α] [FiniteHeight α]
+
+/-- Rank is monotone with respect to `≤`. -/
+theorem rank_le_of_le {a b : α} (h : a ≤ b) : rank a ≤ rank b := by
+  by_cases hab : a = b
+  · subst hab; exact Nat.le_refl _
+  · exact Nat.le_of_lt (rank_lt_of_lt h hab)
+
+end FiniteHeight
+
 end Veir

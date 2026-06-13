@@ -90,6 +90,15 @@ theorem le_trans (a b c : AbstractConstant) : a ≤ b → b ≤ c → a ≤ c :=
 theorem le_antisymm (a b : AbstractConstant) : a ≤ b → b ≤ a → a = b := by
   cases a <;> cases b <;> simp_all [le, le_def]
 
+/--
+The only abstract values below a constant are `⊥` and that constant itself, so a
+non-`⊥` value below `constant c` must equal `constant c`. (Used to show constant
+folding is monotone: raising a known operand can only leave it or send it to `⊤`.)
+-/
+theorem eq_constant_of_le (a : AbstractConstant) (c : ConcreteConstant)
+    (hle : a ≤ .constant c) (hne : a ≠ ⊥) : a = .constant c := by
+  cases a <;> simp_all [le, le_def]
+
 @[simp, grind .]
 theorem le_join_left (a b : AbstractConstant) : a ≤ a ⊔ b := by
   cases a <;> cases b <;> try simp [le, le_def, join]
@@ -123,6 +132,21 @@ instance : AbstractDomain AbstractConstant ConcreteConstant where
   γ_top := rfl
   γ_bot := rfl
   γ_monotone := γ_monotone
+
+/-- The constant lattice has height three: `bottom < constant < top`. -/
+def rank : AbstractConstant → Nat
+  | .bottom => 0
+  | .constant _ => 1
+  | .top => 2
+
+instance : FiniteHeight AbstractConstant where
+  rank := rank
+  maxRank := 2
+  rank_le_maxRank a := by cases a <;> simp [rank]
+  rank_lt_of_lt := by
+    intro a b hab hne
+    cases a <;> cases b <;>
+      simp_all [rank, le_def, le]
 
 end AbstractConstant
 

@@ -7,6 +7,25 @@ public section
 
 namespace Veir
 
+/--
+The full specification of a sparse forward analysis, declared once per analysis.
+
+It ties together the three things a sparse analysis would otherwise have to
+register in separate places:
+* the fact slot `kind` and its lattice `Domain` (inherited from `SparseFactSpec`), and
+* the `AnalysisKind` tag the analysis is scheduled under.
+
+Because the fact kind and the analysis kind live in the same instance, a custom
+analysis can no longer desync them (e.g. by passing the wrong `AnalysisKind` to
+`new`): `SparseForwardDataFlowAnalysis.new` reads the tag straight off this
+instance, so the `(FactKind, AnalysisKind, Domain)` triple has a single source
+of truth.
+-/
+class SparseForwardSpec (kind : FactKind) (Domain : outParam Type)
+    extends SparseFactSpec kind Domain where
+  /-- The `AnalysisKind` tag this sparse analysis is scheduled under. -/
+  analysisKind : AnalysisKind
+
 namespace SparseForwardDataFlowAnalysis
 
 variable {kind : FactKind} {Domain : Type}
@@ -15,13 +34,82 @@ variable {kind : FactKind} {Domain : Type}
 variable [Top Domain] [Bot Domain] [Join Domain] [DecidableEq Domain]
 
 /--
-The transfer function signature used for custom sparse analyses.
+The transfer function a custom sparse analysis supplies.
 
-The framework handles operand subscriptions before invoking this hook, and
-analysis code can recover operands/results directly from the operation pointer.
+This is a *pure, domain-level* function: given an operation and the abstract
+values of its operands (already read out of the lattice by the framework, in
+operand order), it returns the abstract value of each result, in result order.
+
+A custom analysis never touches `DataFlowContext`: the framework owns reading
+operand states, deciding when operands are ready, subscribing for revisits, and
+joining/propagating the results this function returns. That keeps the analysis
+author's code in the same abstract-domain vocabulary their soundness proof lives
+in (see `OpTransfer.Sound`).
+
+When the array returned is shorter than the operation's result count, missing
+results are conservatively treated as `⊤`.
 -/
-abbrev VisitOperationFn :=
-  OperationPtr -> DataFlowContext -> IRContext OpCode -> DataFlowContext
+abbrev OpTransfer (Domain : Type) :=
+  OperationPtr → IRContext OpCode → Array Domain → Array Domain
+
+/--
+The soundness contract for a sparse transfer, relative to a concrete operation
+semantics `eval` (mapping an operation and concrete operand values to its
+concrete result values).
+
+`transfer` is sound when, for every operation, if each operand abstraction
+over-approximates the corresponding concrete operand (`concrete ∈ γ abstract`),
+then each result abstraction `transfer` produces over-approximates the
+corresponding concrete result `eval` produces.
+
+This is the single proof obligation a *verified* sparse analysis discharges. It
+is stated entirely in `Domain`/`γ` terms — no `DataFlowContext`, no worklist — so
+it composes directly with the abstract-domain lemmas an analysis already proves
+(e.g. those for `ConstantDomain`). The generic driver is responsible, once and
+for all, for turning a transfer satisfying this contract into a sound fixpoint;
+the contract is the clean seam between the two.
+
+Result/operand positions that are out of range are quantified vacuously via
+`getElem?`, so this also captures the driver's "missing result ⇒ `⊤`" behavior
+being conservative.
+-/
+def OpTransfer.Sound
+    {Domain Concrete : Type} [LE Domain] [AbstractDomain Domain Concrete]
+    (eval : OperationPtr → Array Concrete → IRContext OpCode → Array Concrete)
+    (transfer : OpTransfer Domain) : Prop :=
+  ∀ (op : OperationPtr) (irCtx : IRContext OpCode)
+    (operandAbstractions : Array Domain) (operandConcretes : Array Concrete),
+    (∀ (i : Nat) (a : Domain) (c : Concrete),
+      operandAbstractions[i]? = some a → operandConcretes[i]? = some c →
+      AbstractDomain.γ a c) →
+    ∀ (i : Nat) (ra : Domain) (rc : Concrete),
+      (transfer op irCtx operandAbstractions)[i]? = some ra →
+      (eval op operandConcretes irCtx)[i]? = some rc →
+      AbstractDomain.γ ra rc
+
+/--
+The maximally-imprecise transfer — every result `⊤` — is sound against *any*
+concrete semantics.
+
+This is the base case `γ_top` discharges, and a check that `OpTransfer.Sound` is
+a genuinely dischargeable obligation rather than a vacuous one: a real analysis'
+soundness proof bottoms out here on the operations it declines to interpret (in
+`SparseConstantPropagation.transfer`, the region-op and `_` fallbacks, which both
+return all `⊤`).
+-/
+theorem OpTransfer.sound_top
+    {Domain Concrete : Type} [LE Domain] [AbstractDomain Domain Concrete]
+    (eval : OperationPtr → Array Concrete → IRContext OpCode → Array Concrete) :
+    OpTransfer.Sound eval
+      (fun op irCtx _ => Array.replicate (op.getNumResults! irCtx) (⊤ : Domain)) := by
+  intro op irCtx operandAbstractions operandConcretes _ i ra rc hra _
+  simp only [Array.getElem?_replicate] at hra
+  split at hra
+  · have hra : ra = (⊤ : Domain) := by simpa using hra.symm
+    subst hra
+    rw [AbstractDomain.γ_top]
+    trivial
+  · simp at hra
 
 /--
 Join a sparse lattice fact into the target value state and propagate updates
@@ -30,7 +118,7 @@ when it changes.
 This is the generic sparse analysis primitive that merges an incoming lattice
 element into the stored state for an SSA value.
 -/
-def joinLatticeElement
+@[expose] def joinLatticeElement
     (kind : FactKind)
     [SparseFactSpec kind Domain]
     (target : ValuePtr)
@@ -237,14 +325,18 @@ partial def subscribeToOperand
 
 /--
 Visit one operation in the sparse analysis.
-We first subscribe to operand lattices, then hand the operation to the user
-provided transfer function.
+
+The framework owns all of the `DataFlowContext` plumbing here: it subscribes to
+the operand lattices (so the operation is revisited when they change), reads the
+operands' current abstractions, waits until they are all initialized, runs the
+analysis' pure `transfer`, and joins each returned result abstraction back into
+the lattice (propagating on change). The analysis itself only sees `Domain`s.
 -/
 partial def visitOperation
     (kind : FactKind)
     [SparseFactSpec kind Domain]
     (analysisKind : AnalysisKind)
-    (visitOperationImpl : VisitOperationFn)
+    (transfer : OpTransfer Domain)
     (op : OperationPtr)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
@@ -267,8 +359,22 @@ partial def visitOperation
   for operand in op.getOperands! irCtx do
     dfCtx := subscribeToOperand kind analysisKind operand dfCtx
 
-  -- Invoke the operation transfer function.
-  visitOperationImpl op dfCtx irCtx
+  -- Read the operands' current abstractions (⊥ = not yet computed).
+  let operandAbstractions := (op.getOperands! irCtx).map
+    (SparseFact.getElementD kind · ⊥ dfCtx)
+
+  -- Optimistically wait until every operand has a value before transferring.
+  if operandAbstractions.any (fun abstraction => abstraction = ⊥) then
+    return dfCtx
+
+  -- Run the analysis' pure transfer function and join each result abstraction.
+  let resultAbstractions := transfer op irCtx operandAbstractions
+  let mut resultIndex := 0
+  for result in op.getResults! irCtx do
+    let incoming := (resultAbstractions[resultIndex]?).getD ⊤
+    dfCtx := joinLatticeElement kind result incoming dfCtx irCtx
+    resultIndex := resultIndex + 1
+  return dfCtx
 
 /--
 Recursively initialize an operation tree for sparse analysis.
@@ -279,14 +385,14 @@ partial def initializeRecursively
     (kind : FactKind)
     [SparseFactSpec kind Domain]
     (analysisKind : AnalysisKind)
-    (visitOperationImpl : VisitOperationFn)
+    (transfer : OpTransfer Domain)
     (op : OperationPtr)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
   -- Initialize the analysis by visiting every owner of an SSA value (all
   -- operations and blocks).
   let mut dfCtx := dfCtx
-  dfCtx := visitOperation kind analysisKind visitOperationImpl op dfCtx irCtx
+  dfCtx := visitOperation kind analysisKind transfer op dfCtx irCtx
 
   for regionPtr in (op.get! irCtx).regions do
     let region := regionPtr.get! irCtx
@@ -298,7 +404,7 @@ partial def initializeRecursively
       let mut maybeOp := (block.get! irCtx).firstOp
 
       while let some nestedOp := maybeOp do
-        dfCtx := initializeRecursively kind analysisKind visitOperationImpl nestedOp dfCtx irCtx
+        dfCtx := initializeRecursively kind analysisKind transfer nestedOp dfCtx irCtx
         maybeOp := (nestedOp.get! irCtx).next
 
       maybeBlock := (block.get! irCtx).next
@@ -314,7 +420,7 @@ private def init
     (kind : FactKind)
     [SparseFactSpec kind Domain]
     (analysisKind : AnalysisKind)
-    (visitOperationImpl : VisitOperationFn)
+    (transfer : OpTransfer Domain)
     (top : OperationPtr)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
@@ -327,7 +433,7 @@ private def init
       for arg in firstBlock.getArguments! irCtx do
         dfCtx := joinLatticeElement kind arg ⊤ dfCtx irCtx
 
-  initializeRecursively kind analysisKind visitOperationImpl top dfCtx irCtx
+  initializeRecursively kind analysisKind transfer top dfCtx irCtx
 
 /--
 Visit an insertion point. If this is at beginning of block and all
@@ -340,13 +446,13 @@ private def visit
     (kind : FactKind)
     [SparseFactSpec kind Domain]
     (analysisKind : AnalysisKind)
-    (visitOperationImpl : VisitOperationFn)
+    (transfer : OpTransfer Domain)
     (point : InsertPoint)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext :=
   match point.prev! irCtx with
   | some prevOp =>
-    visitOperation kind analysisKind visitOperationImpl prevOp dfCtx irCtx
+    visitOperation kind analysisKind transfer prevOp dfCtx irCtx
   | none =>
     match point.block! irCtx with
     | some block =>
@@ -357,18 +463,22 @@ private def visit
 /--
 Build a sparse forward analysis over one abstract value domain.
 
+The fact slot `kind`, its lattice `Domain`, and the `AnalysisKind` tag all come
+from the single `SparseForwardSpec` instance, so the only thing a custom
+analysis supplies here is its transfer function.
+
 Sparse facts default to `⊥`. Whenever control flow or transfer functions lose
 precision, the framework conservatively joins `⊤` into the affected values.
 -/
 def new
     (kind : FactKind)
-    [SparseFactSpec kind Domain]
-    (analysisKind : AnalysisKind)
-    (visitOperationImpl : VisitOperationFn)
+    [spec : SparseForwardSpec kind Domain]
+    (transfer : OpTransfer Domain)
     : DataFlowAnalysis :=
+  let analysisKind := spec.analysisKind
   { kind := analysisKind
-    init := init kind analysisKind visitOperationImpl
-    visit := visit kind analysisKind visitOperationImpl }
+    init := init kind analysisKind transfer
+    visit := visit kind analysisKind transfer }
 
 end SparseForwardDataFlowAnalysis
 

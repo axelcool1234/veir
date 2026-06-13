@@ -34,7 +34,10 @@ A directed control flow edge between two blocks.
 structure CFGEdge where
   source : BlockPtr
   target : BlockPtr
-deriving BEq, Hashable
+-- `DecidableEq` (rather than a structural `BEq`) so the `BEq` used as a hash-map
+-- key is the lawful one from `DecidableEq`; this is what makes `LawfulBEq` and
+-- `LawfulHashable` available for proofs about the fact store.
+deriving DecidableEq, Hashable
 
 /--
 The control flow graph positions and SSA values where dataflow facts are attached.
@@ -43,7 +46,10 @@ inductive LatticeAnchor
   | InsertPoint (point : InsertPoint)
   | ValuePtr (value : ValuePtr)
   | CFGEdge (edge : CFGEdge)
-deriving BEq, Hashable
+-- `DecidableEq` rather than structural `BEq`: see the note on `CFGEdge`. This is
+-- what equips the `HashMap LatticeAnchor …` fact store with `LawfulBEq` /
+-- `LawfulHashable`, which the `getFact?`-after-`setFact` lemmas below rely on.
+deriving DecidableEq, Hashable
 
 instance : Coe InsertPoint LatticeAnchor where
   coe := .InsertPoint
