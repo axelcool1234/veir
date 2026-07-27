@@ -253,11 +253,9 @@ def visit
     (point : InsertPoint)
     (dfCtx : DataFlowContext)
     (irCtx : IRContext OpCode) : DataFlowContext := Id.run do
-  if point.prev! irCtx = none then
-    panic "Dead code visit called on non block start insertion point.
-           Should've already been marked live when initialized!"
-
-  visitOp ((point.prev! irCtx).get!) dfCtx irCtx
+  match point.prev! irCtx with
+  | none => dfCtx
+  | some op => visitOp op dfCtx irCtx
 
 /--
 Recursively initialize the analysis on nested regions.

@@ -130,6 +130,34 @@ private def testDiamond : String :=
      , (("bb5", "bb6"), true)
      ]
 
+
+/--
+Exercise reachability that is discovered against source order.
+
+`bb1` is scanned while dead, so its terminator subscribes the dead-code analysis
+to the block's liveness fact. Visiting the later `bb2` then makes `bb1` live.
+-/
+private def testReachabilityDiscoveredAfterSourceOrderScan : String :=
+  let mlir := "\"builtin.module\"() ({\n\
+^bb0:\n\
+  \"test.test\"() [^bb2] : () -> ()\n\
+^bb1:\n\
+  \"test.test\"() [^bb0] : () -> ()\n\
+^bb2:\n\
+  \"test.test\"() [^bb1] : () -> ()\n\
+}) : () -> ()"
+  run mlir 
+    #[("bb0", true), ("bb1", true), ("bb2", true)] 
+    #[ (("bb0", "bb2"), true)
+    , (("bb2", "bb1"), true)
+    , (("bb1", "bb0"), true)
+    ]
+/--
+info: "ok"
+-/
+#guard_msgs in
+#eval! testReachabilityDiscoveredAfterSourceOrderScan
+
 /--
 info: "ok"
 -/
