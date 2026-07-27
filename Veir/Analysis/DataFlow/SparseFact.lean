@@ -7,6 +7,10 @@ public section
 
 namespace Veir
 
+/--
+Implement this class to register a custom type to be recognized as
+a sparse fact type by the dataflow framework.
+-/
 class SparseFactSpec (kind : FactKind) (Domain : outParam Type) where
   payloadEq : FactPayload kind = SparsePayload Domain
 
