@@ -306,7 +306,7 @@ def tagModArithOpsWithReduction (reduction : ReductionKind)
   if oldAttrs.entries.any (fun entry => entry = (key, value)) then
     return rewriter
   let newAttrs := DictionaryAttr.fromArray
-    (oldAttrs.entries.filter (fun entry => entry.1 != key) |>.push (key, value))
+    (oldAttrs.entries.push (key, value))
   return { rewriter with
     ctx := WfRewriter.setAttributes rewriter.ctx op newAttrs opInBounds
     hasDoneAction := true }
