@@ -57,7 +57,18 @@ class HasDialectOpInfo (opCode: Type)
   Defaults to `true` for every opcode, which conservatively assumes memory is
   read.
   -/
-  readsMemory : opCode → Bool := fun _ => true
+  readsMemory : (op : opCode) → propertiesOf op → Bool := fun _ _ => true
+  /--
+  Whether an operation with this opcode writes memory.
+
+  This reports only that memory may be modified. It does not imply that the
+  operation completely overwrites any particular location, so it is not by
+  itself sufficient to prove that an earlier write is dead.
+
+  Defaults to `true` for every opcode, which conservatively assumes memory is
+  written.
+  -/
+  writesMemory : (op : opCode) → propertiesOf op → Bool := fun _ _ => true
   /--
   Whether an operation with this opcode materializes a literal constant
   value: no operands, one result, no side effects, and a result that is
