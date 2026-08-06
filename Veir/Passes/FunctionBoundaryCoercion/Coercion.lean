@@ -116,14 +116,12 @@ def CoerceFunctionBoundariesPass.impl (coercion : BoundaryCoercion) (ctx : WfIRC
 public def CoerceFunctionBoundariesToRiscvRegPass : Pass OpCode :=
   { name := "coerce-function-boundaries-to-riscv-reg"
     description := "Coerce i32/i64/pointer function boundaries to `!riscv.reg`."
-    run := CoerceFunctionBoundariesPass.impl .riscvReg }
+    run := fun _ => CoerceFunctionBoundariesPass.impl .riscvReg }
 
 public def CoerceModArithFunctionBoundariesPass : Pass OpCode :=
   { name := "coerce-mod-arith-function-boundaries"
     description := "Coerce `!mod_arith.int` function boundaries to their storage integer type."
-    run := CoerceFunctionBoundariesPass.impl (.modArithToInt id) }
-
-public def CoerceModArithFunctionBoundariesPassPow2Width : Pass OpCode :=
-  { name := "coerce-mod-arith-function-boundaries-pow2-width"
-    description := "Coerce `!mod_arith.int` function boundaries to their storage integer type, widened to a power of two."
-    run := CoerceFunctionBoundariesPass.impl (.modArithToInt Nat.nextPowerOfTwo) }
+    options := .ofList [("pow2-width", "Widen the storage integer type to a power-of-two bitwidth.")]
+    run := fun options =>
+      CoerceFunctionBoundariesPass.impl
+        (.modArithToInt (if options.contains "pow2-width" then Nat.nextPowerOfTwo else id)) }

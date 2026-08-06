@@ -1,10 +1,10 @@
 // RUN: veir-opt %s -p=mod-arith-to-arith | filecheck %s --check-prefix=REMUI
-// RUN: veir-opt %s -p=mod-arith-to-arith-barrett | filecheck %s --check-prefix=BARRETT
-// RUN: veir-opt %s -p=mod-arith-to-arith-pow2-width | filecheck %s --check-prefix=REMUI_POW2
-// RUN: veir-opt %s -p=mod-arith-to-arith-barrett-pow2-width | filecheck %s --check-prefix=BARRETT_POW2
+// RUN: veir-opt %s -p='mod-arith-to-arith{barrett}' | filecheck %s --check-prefix=BARRETT
+// RUN: veir-opt %s -p='mod-arith-to-arith{pow2-width}' | filecheck %s --check-prefix=REMUI_POW2
+// RUN: veir-opt %s -p='mod-arith-to-arith{barrett pow2-width}' | filecheck %s --check-prefix=BARRETT_POW2
 
 // Lowering of mod_arith.mul into the arith dialect. The non-power-of-two i33 storage width
-// distinguishes the exact-width and power-of-two-width pass variants.
+// distinguishes the exact-width and power-of-two-width options.
 
 "builtin.module"() ({
   "func.func"() <{function_type = (!mod_arith.int<7 : i33>, !mod_arith.int<7 : i33>) -> !mod_arith.int<7 : i33>, sym_name = "main"}> ({

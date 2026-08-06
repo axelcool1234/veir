@@ -1,7 +1,7 @@
 // RUN: veir-opt %s -p=mod-arith-to-arith | filecheck %s --check-prefix=REMUI
-// RUN: veir-opt %s -p=mod-arith-to-arith-barrett | filecheck %s --check-prefix=BARRETT
-// RUN: veir-opt %s -p=mod-arith-to-arith-pow2-width | filecheck %s --check-prefix=REMUI_POW2
-// RUN: veir-opt %s -p=mod-arith-to-arith-barrett-pow2-width | filecheck %s --check-prefix=BARRETT_POW2
+// RUN: veir-opt %s -p='mod-arith-to-arith{barrett}' | filecheck %s --check-prefix=BARRETT
+// RUN: veir-opt %s -p='mod-arith-to-arith{pow2-width}' | filecheck %s --check-prefix=REMUI_POW2
+// RUN: veir-opt %s -p='mod-arith-to-arith{barrett pow2-width}' | filecheck %s --check-prefix=BARRETT_POW2
 
 // Lowering of mod_arith.add into the arith dialect. Each operand is unpacked into a wider
 // intermediate type (i33 exactly, or i64 with power-of-two widths), the sum and final reduction

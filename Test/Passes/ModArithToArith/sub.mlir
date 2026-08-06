@@ -1,7 +1,7 @@
 // RUN: veir-opt %s -p=mod-arith-to-arith | filecheck %s --check-prefix=REMUI
-// RUN: veir-opt %s -p=mod-arith-to-arith-barrett | filecheck %s --check-prefix=BARRETT
-// RUN: veir-opt %s -p=mod-arith-to-arith-pow2-width | filecheck %s --check-prefix=REMUI_POW2
-// RUN: veir-opt %s -p=mod-arith-to-arith-barrett-pow2-width | filecheck %s --check-prefix=BARRETT_POW2
+// RUN: veir-opt %s -p='mod-arith-to-arith{barrett}' | filecheck %s --check-prefix=BARRETT
+// RUN: veir-opt %s -p='mod-arith-to-arith{pow2-width}' | filecheck %s --check-prefix=REMUI_POW2
+// RUN: veir-opt %s -p='mod-arith-to-arith{barrett pow2-width}' | filecheck %s --check-prefix=BARRETT_POW2
 
 // Lowering of mod_arith.sub into the arith dialect. To avoid unsigned underflow when lhs < rhs,
 // the difference is computed as (a + q) - b in a wider intermediate type (i33 exactly, or i64

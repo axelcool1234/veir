@@ -86,4 +86,4 @@ def LegalizePass.impl (ctx : WfIRContext OpCode) (op : OperationPtr) (_ : op.InB
 public def LegalizePass : Pass OpCode :=
   { name := "legalize"
     description := "Legalize types."
-    run := LegalizePass.impl }
+    run := fun _ => LegalizePass.impl }
