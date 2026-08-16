@@ -342,6 +342,11 @@ def Llvm.isConstantLike (op : Llvm) : Bool :=
   | .mlir__constant | .mlir__poison | .mlir__addressof => true
   | _ => false
 
+def Llvm.isFunctionLike (op : Llvm) : Bool :=
+  match op with
+  | .func => true
+  | _ => false
+
 def Llvm.hasSSADominance (_op : Llvm) (_index : Nat) : Bool :=
   true
 
@@ -361,6 +366,7 @@ instance : HasOpInfo Llvm where
   hasSideEffects := Llvm.hasSideEffects
   getEffects := Llvm.getEffects
   isConstantLike := Llvm.isConstantLike
+  isFunctionLike := Llvm.isFunctionLike
   hasSSADominance := Llvm.hasSSADominance
   isTerminator := Llvm.isTerminator
 
