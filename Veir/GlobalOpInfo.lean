@@ -278,8 +278,6 @@ instance : HasOpInfo OpCode where
 
 #generate_has_dialect_instances OpCode
 
-abbrev propertiesOf := HasOpInfo.propertiesOf (self := instHasOpInfoOpCode)
-
 /--
 Ask the dialect of `opCode` how to represent a folded
 constant. Dialects without a materializer, and values a dialect cannot
