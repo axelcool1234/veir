@@ -59,6 +59,7 @@ def getSuccessorOperands?
       | .riscv_cf .bltu
       | .riscv_cf .bgeu => some 2
       | _ => none
+    -- TODO: Move the operandSegmentSizes logic to the respective dialects
     -- Read the operand segment metadata from the operation's typed properties.
     let attrs := Properties.toAttrDict opType (branchOp.getProperties! raw opType)
     let some (.denseArrayAttr sizes) := attrs["operandSegmentSizes".toUTF8]? | none
