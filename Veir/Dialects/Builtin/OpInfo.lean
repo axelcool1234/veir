@@ -37,11 +37,6 @@ def Builtin.toAttrDict
   | .unregistered => Std.HashMap.ofList props.properties.entries.toList
   | _ => Std.HashMap.emptyWithCapacity 0
 
-def Builtin.hasSideEffects (op : Builtin) (_props : Builtin.propertiesOf op) : Bool :=
-  match op with
-  | .unrealized_conversion_cast => false
-  | _ => true
-
 def Builtin.getEffects
     (op : Builtin) (_props : Builtin.propertiesOf op) : MemoryEffects :=
   match op with
@@ -71,7 +66,6 @@ instance : HasOpInfo Builtin where
   propertiesOf := Builtin.propertiesOf
   fromAttrDict := Builtin.fromAttrDict
   toAttrDict := Builtin.toAttrDict
-  hasSideEffects := Builtin.hasSideEffects
   getEffects := Builtin.getEffects
   isConstantLike := Builtin.isConstantLike
   hasSSADominance := Builtin.hasSSADominance

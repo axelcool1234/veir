@@ -68,25 +68,8 @@ class HasOpInfo (opCode: Type)
   decideEq : DecidableEq (opCode) := by
     intros opCode1 opCode2; cases opCode1 <;> cases opCode2 <;> infer_instance
   /--
-  Whether an operation with this opcode and these properties may have
-  effects that make it ineligible for transformations that add /
-  remove / rearrange instructions (terminators count as having
-  effects). Defaults to `true` for every opcode, which conservatively
-  disables such transformations.
-  -/
-  hasSideEffects : (op : opCode) → propertiesOf op → Bool := fun _ _ => true
-  /--
   The memory effects of an operation with this opcode and these properties,
   mirroring MLIR's `MemoryEffectOpInterface::getEffects`.
-
-  This is deliberately separate from `hasSideEffects`: a non-volatile load has
-  a read effect and yet is eligible for removal when its result is unused, so
-  `hasSideEffects` reports `false` for it. Fold-time evaluation must consult
-  the effects as well before running an operation against memory that is not
-  the program's.
-
-  Defaults to `.unknown` for every opcode, which conservatively assumes every
-  modeled memory effect.
   -/
   getEffects : (op : opCode) → propertiesOf op → MemoryEffects :=
     fun _ _ => .unknown

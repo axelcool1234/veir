@@ -114,9 +114,6 @@ def Arith.toAttrDict
     dict
   | _ => Std.HashMap.emptyWithCapacity 0
 
-def Arith.hasSideEffects (_op : Arith) (_props : Arith.propertiesOf _op) : Bool :=
-  false
-
 def Arith.getEffects
     (_op : Arith) (_props : Arith.propertiesOf _op) : MemoryEffects :=
   .none
@@ -137,7 +134,6 @@ instance : HasOpInfo Arith where
   propertiesOf := Arith.propertiesOf
   fromAttrDict := Arith.fromAttrDict
   toAttrDict := Arith.toAttrDict
-  hasSideEffects := Arith.hasSideEffects
   getEffects := Arith.getEffects
   isConstantLike := Arith.isConstantLike
   hasSSADominance := Arith.hasSSADominance
