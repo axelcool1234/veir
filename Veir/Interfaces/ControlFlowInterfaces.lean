@@ -19,16 +19,9 @@ structure SuccessorOperands where
   forwardedOperands : Array ValuePtr
 deriving Inhabited, Repr, DecidableEq
 
-namespace SuccessorOperands
-
-/--
-  Return the SSA value forwarded to a successor block argument.
--/
-def getForwardedOperand?
-    (operands : SuccessorOperands) (blockArgumentIndex : Nat) : Option ValuePtr :=
-  operands.forwardedOperands[blockArgumentIndex]?
-
-end SuccessorOperands
+instance : GetElem SuccessorOperands Nat ValuePtr
+    (fun operands blockArgumentIndex => blockArgumentIndex < operands.forwardedOperands.size) where
+  getElem := fun operands blockArgumentIndex h => operands.forwardedOperands[blockArgumentIndex]'h
 
 namespace BranchOpInterface
 
@@ -83,7 +76,7 @@ def getSuccessorOperand?
     (branchOp : OperationPtr) (successorIndex blockArgumentIndex : Nat)
     (raw : IRContext OpCode) : Option ValuePtr :=
   getSuccessorOperands? branchOp successorIndex raw >>= fun operands =>
-    operands.getForwardedOperand? blockArgumentIndex
+    operands[blockArgumentIndex]?
 
 end BranchOpInterface
 
