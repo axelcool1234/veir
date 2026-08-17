@@ -32,6 +32,15 @@ def OperationPtr.getEffects {OpInfo : Type} [HasOpInfo OpInfo]
   let opType := op.getOpType! ctx
   HasOpInfo.getEffects opType (op.getProperties! ctx opType)
 
+/--
+  Whether this operation is known to have no memory effects. This
+  does not imply that the operation is safe to speculate: it may still
+  affect control flow or trigger immediate undefined behavior.
+-/
+def OperationPtr.isMemoryIndependent {OpInfo : Type} [HasOpInfo OpInfo]
+    (op : OperationPtr) (ctx : IRContext OpInfo) : Bool :=
+  op.getEffects ctx == .none
+
 end
 
 end Veir
