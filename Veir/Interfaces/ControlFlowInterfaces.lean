@@ -41,13 +41,9 @@ def getSuccessorOperands?
   let opType := branchOp.getOpType! raw
   match opType with
   | .cf .br | .llvm .br | .riscv_cf .branch =>
-    -- Unconditional branches have one successor and forward every operation operand.
-    if branchOp.getNumSuccessors! raw ≠ 1 || successorIndex ≠ 0 then
-      none
-    else
-      some {
-        forwardedOperands := branchOp.getOperands! raw
-      }
+    some {
+      forwardedOperands := branchOp.getOperands! raw
+    }
   | _ => do
     -- Determine whether this is a supported conditional branch and how many
     -- fixed operands appear before its successor operand segments.
@@ -66,26 +62,11 @@ def getSuccessorOperands?
     -- Read the operand segment metadata from the operation's typed properties.
     let attrs := Properties.toAttrDict opType (branchOp.getProperties! raw opType)
     let some (.denseArrayAttr sizes) := attrs["operandSegmentSizes".toUTF8]? | none
-    let successorCount := branchOp.getNumSuccessors! raw
     let segmentSizes := sizes.values
-    -- Validate the requested successor and the basic shape of the segment metadata.
-    if successorIndex ≥ successorCount then
-      none
-    if segmentSizes.size ≠ fixedOperandCount + successorCount then
-      none
-    if segmentSizes.extract 0 fixedOperandCount |>.any (· ≠ 1) then
-      none
-    if segmentSizes.any (· < 0) then
-      none
     -- Select the segment corresponding to the requested successor.
     let segmentIndex := fixedOperandCount + successorIndex
     let forwardedCountRaw ← segmentSizes[segmentIndex]?
     let forwardedCount := forwardedCountRaw.toNat
-    let operandCount := branchOp.getNumOperands! raw
-    -- Ensure the segment metadata accounts for every operation operand.
-    let segmentSum := segmentSizes.foldl (init := 0) fun acc value => acc + value.toNat
-    if segmentSum ≠ operandCount then
-      none
     -- Compute the operation operand index where this successor's forwarded values begin.
     let forwardedStart := fixedOperandCount +
       (segmentSizes.extract fixedOperandCount segmentIndex).foldl
