@@ -50,6 +50,10 @@ def Cf.isConstantLike (_op : Cf) : Bool :=
 def Cf.hasSSADominance (_op : Cf) (_index : Nat) : Bool :=
   true
 
+/-- Every `cf` operation is a branch. -/
+def Cf.isBranchOp (_op : Cf) : Bool :=
+  true
+
 /-- Every `cf` operation is a branch, and so terminates its block. -/
 def Cf.isTerminator (_op : Cf) : Bool :=
   true
@@ -65,6 +69,7 @@ instance : HasOpInfo Cf where
   getEffects := Cf.getEffects
   isConstantLike := Cf.isConstantLike
   hasSSADominance := Cf.hasSSADominance
+  isBranchOp := Cf.isBranchOp
   isTerminator := Cf.isTerminator
 
 /--

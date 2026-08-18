@@ -121,6 +121,28 @@ def OpCode.hasNoTerminator (opCode : OpCode) (index : Nat) : Bool :=
   | .test op => HasOpInfo.hasNoTerminator op index
 
 /--
+  Whether this `OpCode` is a branch operation. Dialects that do not say
+  otherwise inherit the `HasOpInfo` default of `false`.
+-/
+def OpCode.isBranchOp (opCode : OpCode) : Bool :=
+  match opCode with
+  | .arith op => HasOpInfo.isBranchOp op
+  | .llvm op => HasOpInfo.isBranchOp op
+  | .riscv op => HasOpInfo.isBranchOp op
+  | .riscv_cf op => HasOpInfo.isBranchOp op
+  | .riscv_stack op => HasOpInfo.isBranchOp op
+  | .rv64 op => HasOpInfo.isBranchOp op
+  | .mod_arith op => HasOpInfo.isBranchOp op
+  | .cf op => HasOpInfo.isBranchOp op
+  | .comb op => HasOpInfo.isBranchOp op
+  | .hw op => HasOpInfo.isBranchOp op
+  | .builtin op => HasOpInfo.isBranchOp op
+  | .func op => HasOpInfo.isBranchOp op
+  | .datapath op => HasOpInfo.isBranchOp op
+  | .pdl op => HasOpInfo.isBranchOp op
+  | .test op => HasOpInfo.isBranchOp op
+
+/--
   Does this OpCode count as an MLIR basic block terminator? Dialects that do
   not say otherwise inherit the `HasOpInfo` default of `false`.
 -/
@@ -248,6 +270,7 @@ instance : HasOpInfo OpCode where
   getRegionKind := OpCode.getRegionKind
   hasSSADominance := OpCode.hasSSADominance
   hasNoTerminator := OpCode.hasNoTerminator
+  isBranchOp := OpCode.isBranchOp
   isTerminator := OpCode.isTerminator
 
 #generate_has_dialect_instances OpCode

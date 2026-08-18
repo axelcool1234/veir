@@ -64,6 +64,10 @@ def Riscv_Cf.isConstantLike (_op : Riscv_Cf) : Bool :=
 def Riscv_Cf.hasSSADominance (_op : Riscv_Cf) (_index : Nat) : Bool :=
   true
 
+/-- Every `riscv_cf` operation is a branch. -/
+def Riscv_Cf.isBranchOp (_op : Riscv_Cf) : Bool :=
+  true
+
 /-- Every `riscv_cf` operation is a branch, and so terminates its block. -/
 def Riscv_Cf.isTerminator (_op : Riscv_Cf) : Bool :=
   true
@@ -79,6 +83,7 @@ instance : HasOpInfo Riscv_Cf where
   getEffects := Riscv_Cf.getEffects
   isConstantLike := Riscv_Cf.isConstantLike
   hasSSADominance := Riscv_Cf.hasSSADominance
+  isBranchOp := Riscv_Cf.isBranchOp
   isTerminator := Riscv_Cf.isTerminator
 
 /--

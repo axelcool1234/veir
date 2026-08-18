@@ -88,6 +88,10 @@ class HasOpInfo (opCode: Type)
   -/
   hasNoTerminator : opCode → Nat → Bool := fun _ _ => false
   /--
+  Whether an operation with this opcode is a branch operation.
+  -/
+  isBranchOp : opCode → Bool := fun _ => false
+  /--
   Does this OpCode count as an MLIR basic block terminator?
   -/
   isTerminator : opCode → Bool := fun _ => false

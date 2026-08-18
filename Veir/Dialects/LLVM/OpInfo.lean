@@ -325,6 +325,11 @@ def Llvm.isFunctionLike (op : Llvm) : Bool :=
 def Llvm.hasSSADominance (_op : Llvm) (_index : Nat) : Bool :=
   true
 
+def Llvm.isBranchOp (op : Llvm) : Bool :=
+  match op with
+  | .br | .cond_br => true
+  | _ => false
+
 def Llvm.isTerminator (op : Llvm) : Bool :=
   match op with
   | .br | .cond_br | .return | .unreachable => true
@@ -342,6 +347,7 @@ instance : HasOpInfo Llvm where
   isConstantLike := Llvm.isConstantLike
   isFunctionLike := Llvm.isFunctionLike
   hasSSADominance := Llvm.hasSSADominance
+  isBranchOp := Llvm.isBranchOp
   isTerminator := Llvm.isTerminator
 
 /-- Whether `n` is a valid LLVM alignment: a strictly positive power of two. -/
