@@ -23,6 +23,10 @@ instance : GetElem SuccessorOperands Nat ValuePtr
     (fun operands blockArgumentIndex => blockArgumentIndex < operands.forwardedOperands.size) where
   getElem := fun operands blockArgumentIndex h => operands.forwardedOperands[blockArgumentIndex]'h
 
+instance : GetElem? SuccessorOperands Nat ValuePtr
+    (fun operands blockArgumentIndex => blockArgumentIndex < operands.forwardedOperands.size) where
+  getElem? := fun operands blockArgumentIndex => operands.forwardedOperands[blockArgumentIndex]?
+
 namespace BranchOpInterface
 
 /--
