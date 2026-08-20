@@ -3,6 +3,7 @@ module
 public import Veir.Verifier.Lemmas
 public import Veir.GlobalOpInfo
 public import Veir.Interfaces.FunctionInterfaces
+public import Veir.IRNesting
 public import Veir.Interfaces.RegionKindInterfaces
 
 import all Veir.Verifier.Basic
@@ -22,6 +23,41 @@ def OperationPtr.verifyTerminatorPosition (op : OperationPtr) (ctx : WfIRContext
   let operation := op.get ctx.raw opIn
   if operation.opType.isTerminator && operation.next.isSome then
     throw "Expected a terminator to be the last operation of its block"
+
+/--
+Find the region that establishes the nearest `IsolatedFromAbove` scope around
+`region`. The returned region is one of the isolated operation's direct
+regions; different regions of the same isolated operation are separate scopes.
+-/
+private partial def RegionPtr.nearestIsolatedScope?
+    (region : RegionPtr) (ctx : WfIRContext OpCode) : Option RegionPtr := do
+  let parentOp ← (region.get! ctx.raw).parent
+  if (parentOp.getOpType! ctx.raw).isIsolatedFromAbove then
+    return region
+  let parentRegion ← parentOp.getParentRegion! ctx.raw
+  parentRegion.nearestIsolatedScope? ctx
+
+/--
+Verify MLIR's `IsolatedFromAbove` rule for one operation's operands. A use in
+an isolated operation's region may only reference a value defined in that same
+region or one of its nested regions. Looking for the nearest isolated scope
+also mirrors MLIR's behavior of checking nested isolated operations
+independently.
+-/
+def OperationPtr.verifyOperandIsolation
+    (op : OperationPtr) (ctx : WfIRContext OpCode)
+    (opIn : op.InBounds ctx.raw) : Except String PUnit := do
+  if op.getNumOperands ctx.raw opIn == 0 then return
+  let some useRegion := op.getParentRegion! ctx.raw | return
+  let escaping := (op.getOperands ctx.raw opIn).filter
+    (·.getParentRegion! ctx.raw != some useRegion)
+  if escaping.isEmpty then return
+  let some isolatedScope := useRegion.nearestIsolatedScope? ctx | return
+  for value in escaping do
+    let some defRegion := value.getParentRegion! ctx.raw
+      | throw "operand is unlinked from any region"
+    if !isolatedScope.isAncestorOf defRegion ctx then
+      throw "operand uses a value defined outside the isolated region that encloses its use"
 
 /--
   Check that a block is non-empty and its last operation is a
@@ -125,7 +161,8 @@ def WfIRContext.verify (ctx : WfIRContext OpCode) : Except String Unit := do
         op.verifyLocalInvariants ctx opIn
         match (op.get ctx.raw opIn).parent with
         | some _ => op.verifyTerminatorPosition ctx opIn
-        | none => pure ()))
+        | none => pure ()
+        op.verifyOperandIsolation ctx opIn))
   ctx.raw.forBlocksDepM (fun block blockIn => do
     match (block.get ctx.raw blockIn).parent with
     | some region =>
