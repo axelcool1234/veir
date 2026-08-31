@@ -71,8 +71,7 @@ not live by default.
 -/
 private def isEdgeLive
     (edge : CFGEdge)
-    (dfCtx : DataFlowContext)
-    (_irCtx : WfIRContext OpCode) : Bool :=
+    (dfCtx : DataFlowContext) : Bool :=
   if !dfCtx.hasAnalysis .deadCode then
     true
   else
@@ -151,7 +150,7 @@ private def visitBlock
 
     -- If the edge from the predecessor block to the current block is not live,
     -- bail out.
-    if !isEdgeLive edge dfCtx irCtx then
+    if !isEdgeLive edge dfCtx then
       continue
 
     -- Check if we can reason about the dataflow from the predecessor.
