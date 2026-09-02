@@ -330,6 +330,33 @@ macro "#assert " e:term : command =>
 #assert expectErrorType "!mod_arith.int<17>" "Expected punctuation ':'" (some 17)
 #assert expectErrorType "!mod_arith.int<17 : x>" "integer type expected after ':' in integer attribute" (some 20)
 
+/-! ## ClangIR types -/
+
+#assert expectSuccessType "!cir.int<s, 32>" (CirIntType.mk true 32)
+#assert expectSuccessType "!cir.int<u, 8>" (CirIntType.mk false 8)
+#assert expectSuccessAttr "!cir.int<s, 32>" (CirIntType.mk true 32)
+#assert expectSuccessType "!cir.bool" (CirBoolType.mk)
+#assert expectSuccessType "!cir.func<()>" (CirFuncType.mk (FunctionType.mk #[] #[] false))
+#assert expectSuccessType "!cir.func<(!cir.int<s, 32>, !cir.bool) -> !cir.int<s, 32>>"
+  (CirFuncType.mk (FunctionType.mk
+    #[(CirIntType.mk true 32 : Attribute), (CirBoolType.mk : Attribute)]
+    #[(CirIntType.mk true 32 : Attribute)] false))
+#assert expectSuccessType "!cir.func<(!cir.int<s, 32>, ...) -> !cir.int<s, 32>>"
+  (CirFuncType.mk (FunctionType.mk
+    #[(CirIntType.mk true 32 : Attribute)] #[(CirIntType.mk true 32 : Attribute)] true))
+#assert expectErrorType "!cir.int<x, 32>" "cir.int signedness expected ('s' or 'u')" (some 9)
+#assert expectErrorType "!cir.int<s>" "Expected punctuation ','" (some 10)
+#assert expectErrorType "!cir.int<s, 0>" "cir.int bitwidth must be positive" (some 13)
+
+/-! ## ClangIR attributes -/
+
+#assert expectSuccessAttr "#cir.int<42> : !cir.int<s, 32>" (CirIntAttr.mk 42 (CirIntType.mk true 32))
+#assert expectSuccessAttr "#cir.int<-1> : !cir.int<s, 8>" (CirIntAttr.mk (-1) (CirIntType.mk true 8))
+#assert expectSuccessAttr "#cir.bool<true> : !cir.bool" (CirBoolAttr.mk true)
+#assert expectSuccessAttr "#cir.bool<false> : !cir.bool" (CirBoolAttr.mk false)
+#assert expectErrorAttr "#cir.int<42>" "Expected punctuation ':'" (some 12)
+#assert expectErrorAttr "#cir.int<42> : i32" "#cir.int<N> expects a !cir.int type annotation" (some 15)
+
 /-! ## PDL handle types -/
 #assert expectSuccessType "!pdl.attribute" (PDL.AttributeType.mk)
 #assert expectSuccessType "!pdl.range<value>" (PDL.RangeType.mk .value)

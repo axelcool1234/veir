@@ -305,6 +305,32 @@ structure FeltConstAttr where
   fieldType : FeltType
 deriving Inhabited, Repr, DecidableEq, Hashable
 
+/-! ## ClangIR (`cir`) types and attributes -/
+
+/-- The `!cir.int<s, N>` / `!cir.int<u, N>` type from ClangIR. -/
+structure CirIntType where
+  isSigned : Bool
+  width : Nat
+deriving Inhabited, Repr, DecidableEq, Hashable
+
+/-- The builtin integer type a `!cir.int` lowers to (signedness is dropped). -/
+def CirIntType.toIntegerType (type : CirIntType) : IntegerType := { bitwidth := type.width }
+
+/-- The `!cir.bool` type from ClangIR. -/
+structure CirBoolType
+deriving Inhabited, Repr, DecidableEq, Hashable
+
+/-- The `#cir.int<N> : !cir.int<s|u, W>` attribute from ClangIR. -/
+structure CirIntAttr where
+  value : Int
+  type : CirIntType
+deriving Inhabited, Repr, DecidableEq, Hashable
+
+/-- The `#cir.bool<true|false> : !cir.bool` attribute from ClangIR. -/
+structure CirBoolAttr where
+  value : Bool
+deriving Inhabited, Repr, DecidableEq, Hashable
+
 namespace LLVM
 
 structure VoidType
@@ -390,6 +416,14 @@ deriving Inhabited, Repr, Hashable
   the Lean type level while reusing their common representation.
 -/
 structure LLVMFunctionType where
+  functionType : FunctionType
+deriving Inhabited, Repr, Hashable
+
+/--
+  The payload of a ClangIR function type `!cir.func<(inputs) -> result>`.
+  A function without results is spelled `!cir.func<(inputs)>`.
+-/
+structure CirFuncType where
   functionType : FunctionType
 deriving Inhabited, Repr, Hashable
 
@@ -517,6 +551,16 @@ inductive Attribute
 | feltType (type : FeltType)
 /-- LLZK felt-const attribute (`#felt<const N> : !felt.type`) -/
 | feltConstAttr (attr : FeltConstAttr)
+/-- ClangIR integer type (`!cir.int<s|u, N>`) -/
+| cirIntType (type : CirIntType)
+/-- ClangIR boolean type (`!cir.bool`) -/
+| cirBoolType (type : CirBoolType)
+/-- ClangIR function type (`!cir.func<(..) -> T>`) -/
+| cirFuncType (type : CirFuncType)
+/-- ClangIR integer attribute (`#cir.int<N> : !cir.int<..>`) -/
+| cirIntAttr (attr : CirIntAttr)
+/-- ClangIR boolean attribute (`#cir.bool<b> : !cir.bool`) -/
+| cirBoolAttr (attr : CirBoolAttr)
 /-- LLVM void type -/
 | llvmVoidType (type : LLVM.VoidType)
 /-- LLVM byte type -/
@@ -582,6 +626,10 @@ theorem LLVMFunctionType.sizeOf_functionType {ft : LLVMFunctionType} :
     sizeOf ft.functionType < sizeOf ft := by
   grind [cases LLVMFunctionType]
 
+theorem CirFuncType.sizeOf_functionType {ft : CirFuncType} :
+    sizeOf ft.functionType < sizeOf ft := by
+  grind [cases CirFuncType]
+
 theorem ArrayAttr.sizeOf_elems_value {aa : ArrayAttr} (hx : x ∈ aa.value) :
     sizeOf x < sizeOf aa := by
   grind [Array.sizeOf_lt_of_mem hx, cases ArrayAttr]
@@ -636,6 +684,14 @@ def LLVMFunctionType.decEq (type1 type2 : LLVMFunctionType) : Decidable (type1 =
 termination_by sizeOf type1
 decreasing_by
   apply LLVMFunctionType.sizeOf_functionType
+
+def CirFuncType.decEq (type1 type2 : CirFuncType) : Decidable (type1 = type2) :=
+  match FunctionType.decEq type1.functionType type2.functionType with
+  | isTrue _ => isTrue (by grind [cases CirFuncType])
+  | isFalse _ => isFalse (by grind)
+termination_by sizeOf type1
+decreasing_by
+  apply CirFuncType.sizeOf_functionType
 
 def ArrayAttr.decEq (arr1 arr2 : ArrayAttr) : Decidable (arr1 = arr2) :=
   let value1 := arr1.value
@@ -811,6 +867,24 @@ def Attribute.decEq (attr1 attr2 : Attribute) : Decidable (attr1 = attr2) := by
     exact (match decEq attr1 attr2 with
       | isTrue hEq => isTrue (by grind)
       | isFalse hEq => isFalse (by grind))
+  case cirIntType.cirIntType type1 type2 =>
+    exact (match decEq type1 type2 with
+      | isTrue hEq => isTrue (by grind)
+      | isFalse hEq => isFalse (by grind))
+  case cirBoolType.cirBoolType type1 type2 =>
+    exact (isTrue (by grind))
+  case cirFuncType.cirFuncType type1 type2 =>
+    exact (match CirFuncType.decEq type1 type2 with
+      | isTrue hEq => isTrue (by grind)
+      | isFalse hEq => isFalse (by grind))
+  case cirIntAttr.cirIntAttr attr1 attr2 =>
+    exact (match decEq attr1 attr2 with
+      | isTrue hEq => isTrue (by grind)
+      | isFalse hEq => isFalse (by grind))
+  case cirBoolAttr.cirBoolAttr attr1 attr2 =>
+    exact (match decEq attr1 attr2 with
+      | isTrue hEq => isTrue (by grind)
+      | isFalse hEq => isFalse (by grind))
   case registerType.registerType type1 type2 =>
     exact (match decEq type1 type2 with
       | isTrue hEq => isTrue (by grind)
@@ -874,6 +948,7 @@ end
 instance : DecidableEq Attribute := Attribute.decEq
 instance : DecidableEq FunctionType := FunctionType.decEq
 instance : DecidableEq LLVMFunctionType := LLVMFunctionType.decEq
+instance : DecidableEq CirFuncType := CirFuncType.decEq
 instance : DecidableEq ArrayAttr := ArrayAttr.decEq
 instance : DecidableEq DictionaryAttr := DictionaryAttr.decEq
 instance : DecidableEq UnregisteredAttr := UnregisteredAttr.decEq
@@ -1009,6 +1084,18 @@ instance : ToString FeltConstAttr where
     | some _ => s!"#felt<const {attr.value} : {attr.fieldType}>"
     | none => s!"#felt<const {attr.value}>"
 
+instance : ToString CirIntType where
+  toString type := s!"!cir.int<{if type.isSigned then "s" else "u"}, {type.width}>"
+
+instance : ToString CirBoolType where
+  toString _ := "!cir.bool"
+
+instance : ToString CirIntAttr where
+  toString attr := s!"#cir.int<{attr.value}> : {attr.type}"
+
+instance : ToString CirBoolAttr where
+  toString attr := s!"#cir.bool<{attr.value}> : !cir.bool"
+
 instance : ToString PDL.RangeElement where
   toString element :=
     match element with
@@ -1106,6 +1193,31 @@ termination_by sizeOf type
 decreasing_by
   apply LLVMFunctionType.sizeOf_functionType
 
+/--
+  Print a function type in ClangIR spelling: `!cir.func<(inputs) -> result>`, or
+  `!cir.func<(inputs)>` when there are no results.
+-/
+def FunctionType.toCirString (type : FunctionType) : String :=
+  let paramStrs := type.inputs.toList.map Attribute.toString
+  let paramStrs := if type.isVarArg then paramStrs ++ ["..."] else paramStrs
+  let params := String.intercalate ", " paramStrs
+  match _ : type.outputs.size with
+  | 0 => s!"!cir.func<({params})>"
+  | _ =>
+    let results := String.intercalate ", " (type.outputs.toList.map Attribute.toString)
+    s!"!cir.func<({params}) -> {results}>"
+termination_by sizeOf type
+decreasing_by
+  all_goals first
+    | (apply FunctionType.sizeOf_elems_inputs; grind)
+    | (apply FunctionType.sizeOf_elems_outputs; grind)
+
+def CirFuncType.toString (type : CirFuncType) : String :=
+  type.functionType.toCirString
+termination_by sizeOf type
+decreasing_by
+  apply CirFuncType.sizeOf_functionType
+
 def FunctionType.toString (type : FunctionType) : String :=
   let inputs := String.intercalate ", " (type.inputs.toList.map Attribute.toString)
   let outputs := match _ : type.outputs.size with
@@ -1183,6 +1295,11 @@ def Attribute.toString (attr : Attribute) : String :=
   | .modArithType type => ToString.toString type
   | .feltType type => ToString.toString type
   | .feltConstAttr attr => ToString.toString attr
+  | .cirIntType type => ToString.toString type
+  | .cirBoolType type => ToString.toString type
+  | .cirFuncType type => type.toString
+  | .cirIntAttr attr => ToString.toString attr
+  | .cirBoolAttr attr => ToString.toString attr
   | .llvmVoidType type => ToString.toString type
   | .llvmPointerType type => ToString.toString type
   | .llvmArrayType type => type.toString
@@ -1207,6 +1324,9 @@ instance : ToString FunctionType where
 
 instance : ToString LLVMFunctionType where
   toString := LLVMFunctionType.toString
+
+instance : ToString CirFuncType where
+  toString := CirFuncType.toString
 
 instance : ToString ArrayAttr where
   toString := ArrayAttr.toString
@@ -1437,6 +1557,11 @@ def isType (attr : Attribute) : Bool :=
   | .modArithType _ => true
   | .feltType _ => true
   | .feltConstAttr _ => false
+  | .cirIntType _ => true
+  | .cirBoolType _ => true
+  | .cirFuncType _ => true
+  | .cirIntAttr _ => false
+  | .cirBoolAttr _ => false
   | .registerType _ => true
   | .registerAttr _ => false
   | .llvmVoidType _ => true
@@ -1506,6 +1631,16 @@ theorem isType_functionType type : (functionType type).isType = true := by rfl
 theorem isType_modArithType type : (modArithType type).isType = true := by rfl
 @[simp, grind =]
 theorem isType_feltType type : (feltType type).isType = true := by rfl
+@[simp, grind =]
+theorem isType_cirIntType type : (cirIntType type).isType = true := by rfl
+@[simp, grind =]
+theorem isType_cirBoolType type : (cirBoolType type).isType = true := by rfl
+@[simp, grind =]
+theorem isType_cirFuncType type : (cirFuncType type).isType = true := by rfl
+@[simp, grind =]
+theorem isType_cirIntAttr attr : (cirIntAttr attr).isType = false := by rfl
+@[simp, grind =]
+theorem isType_cirBoolAttr attr : (cirBoolAttr attr).isType = false := by rfl
 @[simp, grind =]
 theorem isType_registerType type : (registerType type).isType = true := by rfl
 @[simp, grind =]
@@ -1702,6 +1837,18 @@ instance : IsTypeAttr ModArithType where
 
 instance : IsTypeAttr FeltType where
   coe type := Attribute.asType (.feltType type) (by rfl)
+  coe_eq_inject _ := by rfl
+
+instance : IsTypeAttr CirIntType where
+  coe type := Attribute.asType (.cirIntType type) (by rfl)
+  coe_eq_inject _ := by rfl
+
+instance : IsTypeAttr CirBoolType where
+  coe type := Attribute.asType (.cirBoolType type) (by rfl)
+  coe_eq_inject _ := by rfl
+
+instance : IsTypeAttr CirFuncType where
+  coe type := Attribute.asType (.cirFuncType type) (by rfl)
   coe_eq_inject _ := by rfl
 
 instance : CoeDep (Option Nat → RegisterType) RegisterType.mk TypeAttr where

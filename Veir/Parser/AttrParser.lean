@@ -710,6 +710,82 @@ def parseOptionalFeltConstAttr : AttrParserM (Option FeltConstAttr) := do
     return some (FeltConstAttr.mk val ft)
   return some (FeltConstAttr.mk val (FeltType.mk innerFieldName))
 
+/-! ## ClangIR (`cir`) types and attributes -/
+
+/--
+  Parse ClangIR's integer type, if present.
+  Its syntax is `!cir.int<s, N>` (signed) or `!cir.int<u, N>` (unsigned).
+-/
+def parseOptionalCirIntType : AttrParserM (Option TypeAttr) := do
+  let token ← peekToken
+  let .exclamationIdent := token.kind | return none
+  let input := (← getThe ParserState).input
+  let typeName := { token.slice with start := token.slice.start + 1 }.of input
+  if typeName ≠ "cir.int".toByteArray then return none
+  let _ ← consumeToken
+  parsePunctuation "<"
+  let isSigned ←
+    if ← parseOptionalKeyword "s".toByteArray then pure true
+    else if ← parseOptionalKeyword "u".toByteArray then pure false
+    else throwAtCurrentPos "cir.int signedness expected ('s' or 'u')"
+  parsePunctuation ","
+  let some width ← parseOptionalInteger false false
+    | throwAtCurrentPos "cir.int bitwidth expected"
+  if width ≤ 0 then throwAtCurrentPos "cir.int bitwidth must be positive"
+  parsePunctuation ">"
+  return some (CirIntType.mk isSigned width.toNat)
+
+/-- Parse ClangIR's boolean type `!cir.bool`, if present. -/
+def parseOptionalCirBoolType : AttrParserM (Option TypeAttr) := do
+  let token ← peekToken
+  let .exclamationIdent := token.kind | return none
+  let input := (← getThe ParserState).input
+  let typeName := { token.slice with start := token.slice.start + 1 }.of input
+  if typeName ≠ "cir.bool".toByteArray then return none
+  let _ ← consumeToken
+  return some CirBoolType.mk
+
+/--
+  Parse ClangIR's integer attribute, if present.
+  Its syntax is `#cir.int<N> : !cir.int<s|u, W>`; the type annotation is mandatory.
+-/
+def parseOptionalCirIntAttr : AttrParserM (Option CirIntAttr) := do
+  let token ← peekToken
+  let .hashIdent := token.kind | return none
+  let input := (← getThe ParserState).input
+  let name := { token.slice with start := token.slice.start + 1 }.of input
+  if name ≠ "cir.int".toByteArray then return none
+  let _ ← consumeToken
+  parsePunctuation "<"
+  let some value ← parseOptionalInteger false true
+    | throwAtCurrentPos "#cir.int<...> expects an integer value"
+  parsePunctuation ">"
+  parsePunctuation ":"
+  let some tyAttr ← parseOptionalCirIntType
+    | throwAtCurrentPos "#cir.int<N> expects a !cir.int type annotation"
+  let .cirIntType ty := tyAttr.val
+    | throwAtCurrentPos "#cir.int<N> expects a !cir.int type annotation"
+  return some (CirIntAttr.mk value ty)
+
+/-- Parse ClangIR's boolean attribute `#cir.bool<true|false> : !cir.bool`, if present. -/
+def parseOptionalCirBoolAttr : AttrParserM (Option CirBoolAttr) := do
+  let token ← peekToken
+  let .hashIdent := token.kind | return none
+  let input := (← getThe ParserState).input
+  let name := { token.slice with start := token.slice.start + 1 }.of input
+  if name ≠ "cir.bool".toByteArray then return none
+  let _ ← consumeToken
+  parsePunctuation "<"
+  let value ←
+    if ← parseOptionalKeyword "true".toByteArray then pure true
+    else if ← parseOptionalKeyword "false".toByteArray then pure false
+    else throwAtCurrentPos "#cir.bool<...> expects `true` or `false`"
+  parsePunctuation ">"
+  parsePunctuation ":"
+  let some _ ← parseOptionalCirBoolType
+    | throwAtCurrentPos "#cir.bool<b> expects a !cir.bool type annotation"
+  return some (CirBoolAttr.mk value)
+
 /--
   Parse CIRCT's HW dialect's `ModulePort::Direction` type.
   Its syntax is `(input|output|inout)`.
@@ -909,6 +985,40 @@ partial def parseOptionalLLVMFunctionType : AttrParserM (Option TypeAttr) := do
   return some ⟨.llvmFunctionType ft, by simp⟩
 
 /--
+  Parse ClangIR's function type, if present.
+  Its syntax is `!cir.func<(inputs) -> result>`, or `!cir.func<(inputs)>` for a function
+  without results. A trailing `...` in the inputs marks a variadic function.
+-/
+partial def parseOptionalCirFuncType : AttrParserM (Option TypeAttr) := do
+  let token ← peekToken
+  let .exclamationIdent := token.kind | return none
+  let input := (← getThe ParserState).input
+  let typeName := { token.slice with start := token.slice.start + 1 }.of input
+  if typeName ≠ "cir.func".toByteArray then return none
+  let _ ← consumeToken
+  parsePunctuation "<"
+  let params ← parseDelimitedList .paren do
+    if (← parseOptionalToken .ellipsis).isSome then
+      return LLVMFuncParam.ellipsis
+    return LLVMFuncParam.type (← parseType)
+  if params.pop.any (· matches .ellipsis) then
+    throwAtCurrentPos "'...' is only valid as the last parameter of a cir function type"
+  let isVarArg := params.any (· matches .ellipsis)
+  let inputs := params.filterMap fun
+    | .type ty => some ty.val
+    | .ellipsis => none
+  let outputs ←
+    if ← parseOptionalPunctuation "->" then
+      match ← parseOptionalDelimitedList .paren parseType with
+      | some outputs => pure (outputs.map (·.val))
+      | none => pure #[(← parseType "cir.func result type expected").val]
+    else
+      pure #[]
+  parsePunctuation ">"
+  let ft := FunctionType.mk inputs outputs isVarArg
+  return some ⟨.cirFuncType (CirFuncType.mk ft), by simp⟩
+
+/--
   Parse a `match` optional handle type `!match.optional<...>`, if present.
 
   The wrapped type is parsed with the general type parser rather than a fixed
@@ -944,6 +1054,12 @@ partial def parseOptionalType : AttrParserM (Option TypeAttr) := do
     return some modArithType
   if let some feltType ← parseOptionalFeltType then
     return some feltType
+  if let some cirIntType ← parseOptionalCirIntType then
+    return some cirIntType
+  if let some cirBoolType ← parseOptionalCirBoolType then
+    return some cirBoolType
+  if let some cirFuncType ← parseOptionalCirFuncType then
+    return some cirFuncType
   if let some llvmVoidType := ← parseOptionalLLVMVoidType then
     return some llvmVoidType
   if let some llvmPointerType := ← parseOptionalLLVMPointerType then
@@ -1075,6 +1191,10 @@ partial def parseOptionalUnregisteredAttrType (attr : Attribute) : AttrParserM A
 partial def parseOptionalAttribute : AttrParserM (Option Attribute) := do
   if let some feltConstAttr ← parseOptionalFeltConstAttr then
     return some feltConstAttr
+  if let some cirIntAttr ← parseOptionalCirIntAttr then
+    return some cirIntAttr
+  if let some cirBoolAttr ← parseOptionalCirBoolAttr then
+    return some cirBoolAttr
   if let some dialectAttr ← parseOptionalDialectAttr then
     return some (← parseOptionalUnregisteredAttrType dialectAttr)
   else if let some locationAttr ← parseOptionalLocationAttr then
