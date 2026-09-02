@@ -222,15 +222,6 @@ structure DenseElementsAttr where
 deriving Inhabited, Repr, DecidableEq, Hashable
 
 /--
-  An attribute from an unknown dialect.
-  It can be either a type attribute or a non-type attribute.
--/
-structure UnregisteredAttr where
-  value : String
-  isType : Bool
-deriving Inhabited, Repr, DecidableEq, Hashable
-
-/--
   A flat symbol reference attribute, e.g., `@foo` or `@"my.func"`.
   The value stores the raw text including the `@` prefix.
 -/
@@ -446,6 +437,23 @@ structure Match.OptionalType where
 deriving Repr, Hashable
 
 /--
+  An attribute from an unknown dialect, kept as its source text.
+  It can be either a type attribute or a non-type attribute.
+
+  A non-type attribute may carry a trailing `: type`, as in
+  `#foo.bar<baz> : i32` or `#foo.bar : !foo.ty`. MLIR's generic parser accepts
+  this suffix on any dialect attribute and hands the type to the dialect, so it
+  is parsed structurally here and printed back after the body; this mirrors
+  `mlir::OpaqueAttr`. `type` is always `none` when `isType` is true, as types
+  never carry a trailing type.
+-/
+structure UnregisteredAttr where
+  value : String
+  isType : Bool
+  type : Option Attribute := none
+deriving Inhabited, Repr, Hashable
+
+/--
   A data structure that represents compile-time information in the IR.
   Attributes are used either as type annotations for SSA values, or
   as extra information stored in operations.
@@ -590,6 +598,10 @@ theorem Match.OptionalType.sizeOf_innerType {t : Match.OptionalType} :
     sizeOf t.innerType < sizeOf t := by
   grind [cases Match.OptionalType]
 
+theorem UnregisteredAttr.sizeOf_type {a : UnregisteredAttr} (h : a.type = some t) :
+    sizeOf t < sizeOf a := by
+  grind [cases UnregisteredAttr]
+
 /-!
   ## DecidableEq instances
 -/
@@ -662,6 +674,25 @@ decreasing_by
   have := @Match.OptionalType.sizeOf_innerType
   grind
 
+def UnregisteredAttr.decEq (attr1 attr2 : UnregisteredAttr) : Decidable (attr1 = attr2) :=
+  let type1 := attr1.type
+  let type2 := attr2.type
+  if _ : attr1.value = attr2.value ∧ attr1.isType = attr2.isType then
+    match h1 : type1, h2 : type2 with
+    | none, none => isTrue (by grind [cases UnregisteredAttr])
+    | some t1, some t2 =>
+      match Attribute.decEq t1 t2 with
+      | isTrue _ => isTrue (by grind [cases UnregisteredAttr])
+      | isFalse _ => isFalse (by grind)
+    | none, some _ => isFalse (by grind)
+    | some _, none => isFalse (by grind)
+  else
+    isFalse (by grind)
+termination_by sizeOf attr1
+decreasing_by
+  have := @UnregisteredAttr.sizeOf_type
+  grind
+
 def DictionaryAttr.decEq (dict1 dict2 : DictionaryAttr) : Decidable (dict1 = dict2) :=
   let entries1 := dict1.entries
   let entries2 := dict2.entries
@@ -729,7 +760,7 @@ def Attribute.decEq (attr1 attr2 : Attribute) : Decidable (attr1 = attr2) := by
       | isTrue hEq => isTrue (by grind)
       | isFalse hEq => isFalse (by grind))
   case unregisteredAttr.unregisteredAttr attr1 attr2 =>
-    exact (match decEq attr1 attr2 with
+    exact (match UnregisteredAttr.decEq attr1 attr2 with
       | isTrue hEq => isTrue (by grind)
       | isFalse hEq => isFalse (by grind))
   case functionType.functionType type1 type2 =>
@@ -845,6 +876,7 @@ instance : DecidableEq FunctionType := FunctionType.decEq
 instance : DecidableEq LLVMFunctionType := LLVMFunctionType.decEq
 instance : DecidableEq ArrayAttr := ArrayAttr.decEq
 instance : DecidableEq DictionaryAttr := DictionaryAttr.decEq
+instance : DecidableEq UnregisteredAttr := UnregisteredAttr.decEq
 
 /-!
   ## ToString implementation
@@ -959,9 +991,6 @@ instance : ToString DenseArrayAttr where
 
 instance : ToString DenseElementsAttr where
   toString attr := s!"dense<{attr.value}> : {attr.type}"
-
-instance : ToString UnregisteredAttr where
-  toString attr := attr.value
 
 instance : ToString FlatSymbolRefAttr where
   toString attr := attr.value
@@ -1111,6 +1140,14 @@ termination_by sizeOf type
 decreasing_by
   apply Match.OptionalType.sizeOf_innerType
 
+def UnregisteredAttr.toString (attr : UnregisteredAttr) : String :=
+  match _h : attr.type with
+  | none => attr.value
+  | some type => s!"{attr.value} : {Attribute.toString type}"
+termination_by sizeOf attr
+decreasing_by
+  exact UnregisteredAttr.sizeOf_type _h
+
 /--
   Convert an attribute to a string representation.
 -/
@@ -1140,7 +1177,7 @@ def Attribute.toString (attr : Attribute) : String :=
   | .denseElementsAttr attr => ToString.toString attr
   | .denseArrayAttr attr => ToString.toString attr
   | .dictionaryAttr attr => attr.toString
-  | .unregisteredAttr attr => ToString.toString attr
+  | .unregisteredAttr attr => attr.toString
   | .flatSymbolRefAttr attr => ToString.toString attr
   | .functionType type => type.toString
   | .modArithType type => ToString.toString type
@@ -1182,6 +1219,9 @@ instance : ToString LLVM.ArrayType where
 
 instance : ToString Match.OptionalType where
   toString := Match.OptionalType.toString
+
+instance : ToString UnregisteredAttr where
+  toString := UnregisteredAttr.toString
 
 /-! ## Attribute Subtype Interface -/
 

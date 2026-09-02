@@ -352,13 +352,16 @@ partial def parseOptionalDialectType : AttrParserM (Option TypeAttr) := do
     let endPos := (← peekToken).slice.stop
     parsePunctuation ">"
     let value := (Slice.mk startPos endPos).of (← getThe ParserState).input
-    return some (⟨UnregisteredAttr.mk (String.fromUTF8! value) true, by grind⟩)
+    return some (⟨UnregisteredAttr.mk (String.fromUTF8! value) true none, by grind⟩)
   else
-    return some (⟨UnregisteredAttr.mk ("!" ++ String.fromUTF8! dialectName) true, by grind⟩)
+    return some (⟨UnregisteredAttr.mk ("!" ++ String.fromUTF8! dialectName) true none, by grind⟩)
 
 /--
   Parse a dialect attribute, if present.
-  A dialect attribute has the form `#dialect.name<body>`.
+  A dialect attribute has the form `#dialect.name` or `#dialect.name<body>`. Attributes VeIR
+  understands are decoded; any other one is kept as an `UnregisteredAttr` when unregistered
+  dialects are allowed. Its optional trailing `: type` is parsed by `parseOptionalAttribute`,
+  since the type parser is defined further down.
 -/
 partial def parseOptionalDialectAttr : AttrParserM (Option Attribute) := do
   let startPos ← getPos
@@ -423,12 +426,14 @@ partial def parseOptionalDialectAttr : AttrParserM (Option Attribute) := do
   if !(← getThe AttrParserState).allowUnregisteredDialect then
     throwAt startPos s!"attribute '#{String.fromUTF8! dialectName}' is not registered. \
       Consider using --allow-unregistered-dialect."
-  parsePunctuation "<"
+  /- The body is optional: `#foo.bar` is as valid as `#foo.bar<baz>`. -/
+  if !(← parseOptionalPunctuation "<") then
+    return some (UnregisteredAttr.mk ("#" ++ String.fromUTF8! dialectName) false none)
   let _ ← parseUnregisteredAttrBody
   let endPos := (← peekToken).slice.stop
   parsePunctuation ">"
   let value := (Slice.mk startPos endPos).of (← getThe ParserState).input
-  return some (UnregisteredAttr.mk (String.fromUTF8! value) false)
+  return some (UnregisteredAttr.mk (String.fromUTF8! value) false none)
 
 /--
   Parse a flat symbol reference attribute, if present.
@@ -799,7 +804,7 @@ partial def parseOptionalLLVMStructType (short := false) : AttrParserM (Option T
   let endPos := (← peekToken).slice.stop
   parsePunctuation ">"
   let body := (Slice.mk startPos endPos).of (← getThe ParserState).input
-  return some ⟨UnregisteredAttr.mk ("!llvm.struct" ++ String.fromUTF8! body) true, by grind⟩
+  return some ⟨UnregisteredAttr.mk ("!llvm.struct" ++ String.fromUTF8! body) true none, by grind⟩
 
 /--
   Parse a type within an LLVM-dialect type body, accepting the LLVM "pretty-print"
@@ -1013,13 +1018,24 @@ partial def parseOptionalDictionaryAttr : AttrParserM (Option DictionaryAttr) :=
   return some (DictionaryAttr.fromArray entries)
 
 /--
+  Parse the optional trailing `: type` of an unregistered dialect attribute.
+  MLIR lets any dialect attribute carry one, e.g. `#foo.bar<baz> : i32`. Nothing else can
+  follow a dialect attribute with a `:`, so the token is unambiguous.
+-/
+partial def parseOptionalUnregisteredAttrType (attr : Attribute) : AttrParserM Attribute := do
+  let .unregisteredAttr ⟨value, false, none⟩ := attr | return attr
+  if ← parseOptionalPunctuation ":" then
+    return (UnregisteredAttr.mk value false (some (← parseType).val) : Attribute)
+  return attr
+
+/--
   Parse an attribute, if present.
 -/
 partial def parseOptionalAttribute : AttrParserM (Option Attribute) := do
   if let some feltConstAttr ← parseOptionalFeltConstAttr then
     return some feltConstAttr
   if let some dialectAttr ← parseOptionalDialectAttr then
-    return some dialectAttr
+    return some (← parseOptionalUnregisteredAttrType dialectAttr)
   else if let some locationAttr ← parseOptionalLocationAttr then
     return some locationAttr
   else if let some type ← parseOptionalType then

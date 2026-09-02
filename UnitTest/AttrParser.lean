@@ -97,6 +97,12 @@ def expectErrorAttr (s : String) (expected : String) (pos : Option Nat)
     && (testAttr s allowUnregisteredDialect).mapError errorInfo = .error (expected, pos)
 
 /--
+  Test that parsing an attribute and printing it back reproduces the input text exactly.
+-/
+def expectRoundTripAttr (s : String) (allowUnregisteredDialect : Bool := false) : Bool :=
+  (testAttr s allowUnregisteredDialect).map Attribute.toString = .ok s
+
+/--
   Macro to simplify test assertions. Wraps the test in #guard_msgs and #eval,
   expecting the result to be `true`.
 -/
@@ -192,9 +198,9 @@ macro "#assert " e:term : command =>
 
 /-! ## Unregistered dialect type -/
 
-#assert expectSuccessType "!foo.bar" ⟨UnregisteredAttr.mk "!foo.bar" true, by grind⟩ true
-#assert expectSuccessType "!foo<bar>" ⟨UnregisteredAttr.mk "!foo<bar>" true, by grind⟩ true
-#assert expectSuccessType "!test.test<bar>" ⟨UnregisteredAttr.mk "!test.test<bar>" true, by grind⟩ true
+#assert expectSuccessType "!foo.bar" ⟨UnregisteredAttr.mk "!foo.bar" true none, by grind⟩ true
+#assert expectSuccessType "!foo<bar>" ⟨UnregisteredAttr.mk "!foo<bar>" true none, by grind⟩ true
+#assert expectSuccessType "!test.test<bar>" ⟨UnregisteredAttr.mk "!test.test<bar>" true none, by grind⟩ true
 
 #assert expectErrorType "!foo.bar" "type '!foo.bar' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
 #assert expectErrorType "!foo<bar>" "type '!foo' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
@@ -203,8 +209,43 @@ macro "#assert " e:term : command =>
 
 /-! ## Unregistered dialect attribute -/
 
-#assert expectSuccessAttr "#foo<bar>" (UnregisteredAttr.mk "#foo<bar>" false) true
-#assert expectSuccessAttr "#test.test<bar>" (UnregisteredAttr.mk "#test.test<bar>" false) true
+#assert expectSuccessAttr "#foo<bar>" (UnregisteredAttr.mk "#foo<bar>" false none) true
+#assert expectSuccessAttr "#test.test<bar>" (UnregisteredAttr.mk "#test.test<bar>" false none) true
+#assert expectSuccessAttr "#foo.bar" (UnregisteredAttr.mk "#foo.bar" false none) true
+#assert expectSuccessAttr "#foo.bar<baz> : i32"
+  (UnregisteredAttr.mk "#foo.bar<baz>" false (some (IntegerType.mk 32 : Attribute))) true
+#assert expectSuccessAttr "#foo.zero : !foo.ty"
+  (UnregisteredAttr.mk "#foo.zero" false (some (UnregisteredAttr.mk "!foo.ty" true none : Attribute))) true
+#assert expectSuccessAttr "#foo.int<1> : !foo.int<s, 32>"
+  (UnregisteredAttr.mk "#foo.int<1>" false
+    (some (UnregisteredAttr.mk "!foo.int<s, 32>" true none : Attribute))) true
+#assert expectSuccessAttr "#foo.bar<1> : !foo.ptr<!foo.int<s, 32>>"
+  (UnregisteredAttr.mk "#foo.bar<1>" false
+    (some (UnregisteredAttr.mk "!foo.ptr<!foo.int<s, 32>>" true none : Attribute))) true
+#assert expectSuccessAttr "#foo<bar> : i1"
+  (UnregisteredAttr.mk "#foo<bar>" false (some (IntegerType.mk 1 : Attribute))) true
+#assert expectSuccessAttr "#foo.bar : (i32) -> i32"
+  (UnregisteredAttr.mk "#foo.bar" false (some (.functionType
+    (FunctionType.mk #[(IntegerType.mk 32 : Attribute)] #[(IntegerType.mk 32 : Attribute)]
+      (isVarArg := false))))) true
+-- A `:` must be followed by a type.
+#assert expectErrorAttr "#foo.bar<baz> :" "type expected" (some 15) true
+#assert expectErrorAttr "#foo.bar : 5" "type expected" (some 11) true
+-- The flag is still required when the attribute has no body or carries a type.
+#assert expectErrorAttr "#foo.bar" "attribute '#foo.bar' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
+#assert expectErrorAttr "#foo.bar<baz> : i32" "attribute '#foo.bar' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
+-- Printing reproduces the source text, with the trailing type after the body.
+#assert expectRoundTripAttr "#foo.bar" true
+#assert expectRoundTripAttr "#foo.bar<baz>" true
+#assert expectRoundTripAttr "#foo.bar<baz> : i32" true
+#assert expectRoundTripAttr "#foo.zero : !foo.ptr<!foo.int<s, 32>>" true
+-- Equality takes the trailing type into account.
+#assert (UnregisteredAttr.mk "#foo.bar" false (some (IntegerType.mk 32 : Attribute))
+  = UnregisteredAttr.mk "#foo.bar" false (some (IntegerType.mk 32 : Attribute)))
+#assert (UnregisteredAttr.mk "#foo.bar" false (some (IntegerType.mk 32 : Attribute))
+  ≠ UnregisteredAttr.mk "#foo.bar" false none)
+#assert (UnregisteredAttr.mk "#foo.bar" false (some (IntegerType.mk 32 : Attribute))
+  ≠ UnregisteredAttr.mk "#foo.bar" false (some (IntegerType.mk 64 : Attribute)))
 
 #assert expectErrorAttr "#foo<bar>" "attribute '#foo' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
 #assert expectErrorAttr "#test.test<bar>" "attribute '#test.test' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
@@ -268,24 +309,24 @@ macro "#assert " e:term : command =>
 
 -- Standalone struct: both forms parse identically, with or without the flag.
 #assert expectSuccessType "!llvm.struct<(i32, f32)>"
-  ⟨UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true, by grind⟩ false
+  ⟨UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true none, by grind⟩ false
 #assert expectSuccessType "!llvm.struct<(i32, f32)>"
-  ⟨UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true, by grind⟩ true
+  ⟨UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true none, by grind⟩ true
 -- Literal struct nested in an array (original `!llvm.array<N x struct<...>>` bug).
 #assert expectSuccessType "!llvm.array<2 x struct<(i32, f32)>>"
-  (LLVM.ArrayType.mk 2 (UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true : Attribute)) true
+  (LLVM.ArrayType.mk 2 (UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true none : Attribute)) true
 #assert expectSuccessType "!llvm.array<2 x struct<(i32, f32)>>"
-  (LLVM.ArrayType.mk 2 (UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true : Attribute)) false
+  (LLVM.ArrayType.mk 2 (UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true none : Attribute)) false
 -- The bare nested form and the prefixed nested form are equivalent.
 #assert expectSuccessType "!llvm.array<2 x !llvm.struct<(i32, f32)>>"
-  (LLVM.ArrayType.mk 2 (UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true : Attribute)) false
+  (LLVM.ArrayType.mk 2 (UnregisteredAttr.mk "!llvm.struct<(i32, f32)>" true none : Attribute)) false
 -- Identified (named) struct: the name is preserved verbatim inside the text.
 #assert expectSuccessType "!llvm.array<23 x struct<\"struct.et_info\", (i8, i8)>>"
   (LLVM.ArrayType.mk 23
-    (UnregisteredAttr.mk "!llvm.struct<\"struct.et_info\", (i8, i8)>" true : Attribute)) true
+    (UnregisteredAttr.mk "!llvm.struct<\"struct.et_info\", (i8, i8)>" true none : Attribute)) true
 -- Packed struct nested in an array.
 #assert expectSuccessType "!llvm.array<4 x struct<packed (i8, i32)>>"
-  (LLVM.ArrayType.mk 4 (UnregisteredAttr.mk "!llvm.struct<packed (i8, i32)>" true : Attribute)) true
+  (LLVM.ArrayType.mk 4 (UnregisteredAttr.mk "!llvm.struct<packed (i8, i32)>" true none : Attribute)) true
 
 /-! ## LLVM Function type -/
 #assert expectSuccessType "!llvm.func<i32 (i32)>"
