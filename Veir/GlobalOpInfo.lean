@@ -33,6 +33,7 @@ match opCode with
 | .pdl op => PDL.propertiesOf op
 | .test op => Test.propertiesOf op
 | .felt op => Felt.propertiesOf op
+| .cir op => Cir.propertiesOf op
 
 /--
   What are the memory effects of an operation with this opcode and these
@@ -58,6 +59,7 @@ def OpCode.getEffects (opCode : OpCode) (props : _propertiesOf opCode) : MemoryE
   | .pdl op, props => PDL.getEffects op props
   | .test op, props => Test.getEffects op props
   | .felt op, props => Felt.getEffects op props
+  | .cir op, props => Cir.getEffects op props
 
 /--
   Return the kind of the region with the given index inside this operation.
@@ -81,6 +83,7 @@ def OpCode.getRegionKind (opCode : OpCode) (index : Nat) : RegionKind :=
   | .pdl op => HasOpInfo.getRegionKind op index
   | .test op => HasOpInfo.getRegionKind op index
   | .felt op => HasOpInfo.getRegionKind op index
+  | .cir op => HasOpInfo.getRegionKind op index
 
 /--
   Whether definitions in the indexed region of this opcode must dominate
@@ -105,6 +108,7 @@ def OpCode.hasSSADominance (opCode : OpCode) (index : Nat) : Bool :=
   | .pdl op => PDL.hasSSADominance op index
   | .test op => Test.hasSSADominance op index
   | .felt op => Felt.hasSSADominance op index
+  | .cir op => Cir.hasSSADominance op index
 
 /--
   Whether the indexed region of this opcode is exempt from the requirement
@@ -130,6 +134,7 @@ def OpCode.hasNoTerminator (opCode : OpCode) (index : Nat) : Bool :=
   | .pdl op => HasOpInfo.hasNoTerminator op index
   | .test op => HasOpInfo.hasNoTerminator op index
   | .felt op => HasOpInfo.hasNoTerminator op index
+  | .cir op => HasOpInfo.hasNoTerminator op index
 
 /-- Whether this opcode carries MLIR's `IsolatedFromAbove` trait. -/
 def OpCode.isIsolatedFromAbove (opCode : OpCode) : Bool :=
@@ -151,6 +156,7 @@ def OpCode.isIsolatedFromAbove (opCode : OpCode) : Bool :=
   | .pdl op => HasOpInfo.isIsolatedFromAbove op
   | .test op => HasOpInfo.isIsolatedFromAbove op
   | .felt op => HasOpInfo.isIsolatedFromAbove op
+  | .cir op => HasOpInfo.isIsolatedFromAbove op
 
 /--
   Does this OpCode count as an MLIR basic block terminator? Dialects that do
@@ -176,6 +182,7 @@ def OpCode.isTerminator (opCode : OpCode) : Bool :=
   | .pdl op => HasOpInfo.isTerminator op
   | .test op => HasOpInfo.isTerminator op
   | .felt op => HasOpInfo.isTerminator op
+  | .cir op => HasOpInfo.isTerminator op
 
 /--
   Does this `OpCode` materialize a literal constant value, i.e. an op
@@ -204,6 +211,7 @@ def OpCode.isConstantLike (opCode : OpCode) : Bool :=
   | .pdl op => PDL.isConstantLike op
   | .test op => Test.isConstantLike op
   | .felt op => Felt.isConstantLike op
+  | .cir op => Cir.isConstantLike op
 
 /--
   Does an operation with this opcode produce a wholly poisoned result whenever
@@ -228,6 +236,7 @@ def OpCode.propagatesPoison (opCode : OpCode) : Bool :=
   | .pdl op => HasOpInfo.propagatesPoison op
   | .test op => HasOpInfo.propagatesPoison op
   | .felt op => HasOpInfo.propagatesPoison op
+  | .cir op => HasOpInfo.propagatesPoison op
 
 def Properties.fromAttrDict (opCode : OpCode) (attrDict : Std.HashMap ByteArray Attribute) :
     Except String (_propertiesOf opCode) :=
@@ -249,6 +258,7 @@ def Properties.fromAttrDict (opCode : OpCode) (attrDict : Std.HashMap ByteArray 
   | .pdl op => PDL.fromAttrDict op attrDict
   | .test op => Test.fromAttrDict op attrDict
   | .felt op => Felt.fromAttrDict op attrDict
+  | .cir op => Cir.fromAttrDict op attrDict
 
 /--
   Converts the properties of an operation into a dictionary of attributes.
@@ -274,6 +284,7 @@ def Properties.toAttrDict
   | .pdl op, props => PDL.toAttrDict op props
   | .test op, props => Test.toAttrDict op props
   | .felt op, props => Felt.toAttrDict op props
+  | .cir op, props => Cir.toAttrDict op props
 
 instance : IsOpCode OpCode where
   fromName := OpCode.fromName
@@ -302,6 +313,7 @@ def OpCode.functionInterface? (opCode : OpCode) : Option (FunctionOpInterface (_
   | .pdl op => HasOpInfo.functionInterface? op
   | .test op => HasOpInfo.functionInterface? op
   | .felt op => HasOpInfo.functionInterface? op
+  | .cir op => HasOpInfo.functionInterface? op
 
 #generate_has_dialect_instances OpCode
 
@@ -326,6 +338,7 @@ def OpCode.verifyLocalInvariants (opCode : OpCode) (op : OperationPtr)
   | .hw opType => HW.verifyLocalInvariants opType op ctx opIn
   | .verif opType => Verif.verifyLocalInvariants opType op ctx opIn
   | .felt opType => Felt.verifyLocalInvariants opType op ctx opIn
+  | .cir opType => Cir.verifyLocalInvariants opType op ctx opIn
 
 instance : HasOpInfo OpCode where
   verifyLocalInvariants := OpCode.verifyLocalInvariants
@@ -359,7 +372,7 @@ def OpCode.materializeConstant (opCode : OpCode) (value : RuntimeValue)
     -- fails to compile until it decides how, or whether, to materialize.
     | .riscv_cf _ | .riscv_stack _ | .rv64 _ | .cf _ | .builtin _
     | .verif _
-    | .func _ | .datapath _ | .pdl _ | .test _ => none
+    | .func _ | .datapath _ | .pdl _ | .test _ | .cir _ => none
   guard materialized.fst.isConstantLike
   return materialized
 
@@ -385,5 +398,6 @@ def OpCode.isCommutative (opCode : OpCode) : Bool :=
   | .riscv .addw | .riscv .mulw
   | .mod_arith .add | .mod_arith .mul
   | .felt .add | .felt .mul
-  | .felt .bit_and | .felt .bit_or | .felt .bit_xor => true
+  | .felt .bit_and | .felt .bit_or | .felt .bit_xor
+  | .cir .add | .cir .mul | .cir .and | .cir .or | .cir .xor | .cir .min | .cir .max => true
   | _ => false

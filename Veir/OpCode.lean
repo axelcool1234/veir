@@ -26,6 +26,7 @@ public import Veir.Dialects.Verif.OpInfo
 public import Veir.Dialects.PDL.OpInfo
 public import Veir.Dialects.Test.OpInfo
 public import Veir.Dialects.LLZK.Felt.OpInfo
+public import Veir.Dialects.Cir.OpInfo
 
 open Std
 
