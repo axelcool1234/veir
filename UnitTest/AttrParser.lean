@@ -23,6 +23,26 @@ def testType (s : String) (allowUnregisteredDialect : Bool := false) :
   let parser ← ParserState.fromInput (s.toByteArray)
   parseType.run' { allowUnregisteredDialect } parser
 
+/-- Build the alias map of an `AttrParserState` from `(name, type)` pairs. -/
+def aliasMap (aliases : List (String × TypeAttr)) : Std.HashMap ByteArray TypeAttr :=
+  aliases.foldl (fun map (name, type) => map.insert name.toByteArray type) {}
+
+/--
+  Run parseType on the given input string with the given type aliases in scope.
+-/
+def testTypeWithAliases (s : String) (aliases : List (String × TypeAttr))
+    (allowUnregisteredDialect : Bool := false) : Except ParserError TypeAttr := do
+  let parser ← ParserState.fromInput (s.toByteArray)
+  parseType.run' { allowUnregisteredDialect, typeAliases := aliasMap aliases } parser
+
+/--
+  Run parseAttribute on the given input string with the given type aliases in scope.
+-/
+def testAttrWithAliases (s : String) (aliases : List (String × TypeAttr))
+    (allowUnregisteredDialect : Bool := false) : Except ParserError Attribute := do
+  let parser ← ParserState.fromInput (s.toByteArray)
+  parseAttribute.run' { allowUnregisteredDialect, typeAliases := aliasMap aliases } parser
+
 /--
   Run parseOptionalAttr on the given input string.
 -/
@@ -206,6 +226,46 @@ macro "#assert " e:term : command =>
 #assert expectErrorType "!foo<bar>" "type '!foo' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
 #assert expectErrorType "!test.test<bar>" "type '!test.test' is not registered. Consider using --allow-unregistered-dialect." (some 0) false
 
+
+/-! ## Type aliases -/
+
+-- An alias resolves to its definition and needs no unregistered-dialect flag.
+#assert (testTypeWithAliases "!int" [("int", IntegerType.mk 32)] = .ok (IntegerType.mk 32))
+#assert (testTypeWithAliases "!int" [("int", IntegerType.mk 32)] true = .ok (IntegerType.mk 32))
+-- Aliases resolve inside compound types.
+#assert (testTypeWithAliases "!llvm.array<2 x !int>" [("int", IntegerType.mk 32)]
+  = .ok (LLVM.ArrayType.mk 2 (IntegerType.mk 32 : Attribute)))
+#assert ((testTypeWithAliases "(!int) -> !int" [("int", IntegerType.mk 32)]).map (·.val)
+  = .ok (.functionType (FunctionType.mk #[(IntegerType.mk 32 : Attribute)]
+      #[(IntegerType.mk 32 : Attribute)] (isVarArg := false))))
+-- An alias may stand for a dialect type.
+#assert (testTypeWithAliases "!p" [("p", LLVM.PointerType.mk)] = .ok LLVM.PointerType.mk)
+-- An undefined alias is an error whether or not unregistered dialects are allowed.
+#assert ((testTypeWithAliases "!int" []).mapError errorInfo
+  = .error ("undefined symbol alias id 'int'", some 0))
+#assert ((testTypeWithAliases "!int" [] true).mapError errorInfo
+  = .error ("undefined symbol alias id 'int'", some 0))
+-- A dialect dot or an adjacent body is a dialect type, not an alias; rejected here as unregistered.
+#assert ((testTypeWithAliases "!foo.bar" [("foo", IntegerType.mk 32)]).mapError errorInfo
+  = .error ("type '!foo.bar' is not registered. Consider using --allow-unregistered-dialect.", some 0))
+#assert ((testTypeWithAliases "!foo<bar>" [("foo", IntegerType.mk 32)]).mapError errorInfo
+  = .error ("type '!foo' is not registered. Consider using --allow-unregistered-dialect.", some 0))
+#assert ((testTypeWithAliases "!foo <bar>" [] true).mapError errorInfo
+  = .error ("undefined symbol alias id 'foo'", some 0))
+-- Aliases also resolve where a specific builtin type is required.
+#assert (testAttrWithAliases "1 : !int" [("int", IntegerType.mk 32)]
+  = .ok (IntegerAttr.mk 1 (IntegerType.mk 32)))
+#assert (testAttrWithAliases "array<!int: 1, 2>" [("int", IntegerType.mk 32)]
+  = .ok (DenseArrayAttr.mk (IntegerType.mk 32) #[1, 2]))
+#assert (testTypeWithAliases "!cuda_tile.ptr<!int>" [("int", IntegerType.mk 32)]
+  = .ok (CudaTile.PointerType.mk (IntegerType.mk 32)))
+#assert (testTypeWithAliases "!hw.modty<input a : !int>" [("int", IntegerType.mk 32)]
+  = .ok (HW.ModuleType.mk #[{ dir := .input, name := "a", type := IntegerType.mk 32 }]))
+-- An alias for another kind of type is rejected at the alias with the position's own message.
+#assert ((testAttrWithAliases "array<!p: 1>" [("p", LLVM.PointerType.mk)]).mapError errorInfo
+  = .error ("integer type expected in dense array attribute", some 6))
+#assert ((testAttrWithAliases "1 : !p" [("p", LLVM.PointerType.mk)]).mapError errorInfo
+  = .error ("integer type expected after ':' in integer attribute", some 4))
 
 /-! ## Unregistered dialect attribute -/
 

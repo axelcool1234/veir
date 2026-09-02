@@ -2,6 +2,7 @@ module
 
 public import Veir.Parser.Parser
 public import Veir.IR.Attribute
+public import Std.Data.HashMap
 
 public section
 
@@ -15,6 +16,8 @@ open Veir.Parser.ParserError
 
 structure AttrParserState where
   allowUnregisteredDialect : Bool := false
+  /-- Type aliases in scope, keyed by name without the `!`. -/
+  typeAliases : Std.HashMap ByteArray TypeAttr := {}
 
 abbrev AttrParserM := StateT AttrParserState (EStateM ParserError ParserState)
 
@@ -121,14 +124,51 @@ def parseOptionalRegisterType : AttrParserM (Option RegisterType) := do
     return some $ RegisterType.mk none
 
 /--
+  Resolve a just-consumed `!name` as a type alias. Returns `none` when the name denotes a dialect
+  type instead, i.e. it contains a `.` or is directly followed by `<body>`.
+-/
+def resolveOptionalTypeAlias (startPos : Location) (name : ByteArray) :
+    AttrParserM (Option TypeAttr) := do
+  let next ← peekToken
+  -- `startPos + 1 + name.size` is the end of the `!name` token, so this `<` has no space before it.
+  let hasBody := next.kind == .less
+    && next.slice.start.byteOffset == startPos.byteOffset + 1 + name.size
+  if hasBody || name.toList.contains '.'.toUInt8 then
+    return none
+  let some type := (← getThe AttrParserState).typeAliases[name]?
+    | throwAt startPos s!"undefined symbol alias id '{String.fromUTF8! name}'"
+  return some type
+
+/--
+  Parse a builtin type via `parseOptional`, or a `!name` alias whose definition is an `α`. Used
+  where MLIR requires a specific builtin type but still accepts an alias for it, e.g. the type of
+  `1 : i32` or the element type of `array<i32: 1, 2>`.
+-/
+def parseBuiltinTypeOrAlias {α : Type} [IsTypeAttr α] (parseOptional : AttrParserM (Option α))
+    (errorMsg : String) : AttrParserM α := do
+  if let some type ← parseOptional then
+    return type
+  let startPos ← getPos
+  let some name ← parseOptionalPrefixedKeyword .exclamationIdent | throwAtCurrentPos errorMsg
+  let some type := (← resolveOptionalTypeAlias startPos name).bind (·.cast? α)
+    | throwAt startPos errorMsg
+  return type
+
+/--
   Parse an integer type, throwing an error if it is not present.
   An integer type is represented as `i` followed by a positive integer indicating
-  its width, e.g., `i32`.
+  its width, e.g., `i32`, or by a type alias standing for one.
 -/
-def parseIntegerType (errorMsg : String := "integer type expected") : AttrParserM IntegerType := do
-  match ← parseOptionalIntegerType with
-  | some integerType => return integerType
-  | none => throwAtCurrentPos errorMsg
+def parseIntegerType (errorMsg : String := "integer type expected") : AttrParserM IntegerType :=
+  parseBuiltinTypeOrAlias parseOptionalIntegerType errorMsg
+
+/--
+  Parse a float type, throwing an error if it is not present.
+  A float type is represented as `f` followed by its width, e.g., `f64`, or by a type alias
+  standing for one.
+-/
+def parseFloatType (errorMsg : String := "float type expected") : AttrParserM FloatType :=
+  parseBuiltinTypeOrAlias parseOptionalFloatType errorMsg
 
 /--
   Parse a register type, throwing an error if it is not present.
@@ -175,8 +215,7 @@ def parseOptionalFloatAttr : AttrParserM (Option FloatAttr) := do
   if str ≠ "1.0" then
     throwAtCurrentPos s!"unsupported floating-point literal '{str}', only '1.0 : f64' is supported"
   parsePunctuation ":"
-  let some floatType ← parseOptionalFloatType
-    | throwAtCurrentPos "float type expected after ':' in float attribute"
+  let floatType ← parseFloatType "float type expected after ':' in float attribute"
   if floatType.bitwidth ≠ 64 then
     throwAtCurrentPos "unsupported float type, only f64 is supported"
   return some (Veir.FloatAttr.mk 1.0 floatType)
@@ -337,13 +376,16 @@ private def parseUnregisteredAttrBody (endToken : TokenKind := .greater)
   | none => throwAt startPos "failed converting attribute body to string"
 
 /--
-  Parse a dialect type, if present.
-  A dialect attribute has the form `!dialect.name` or `!dialect.name<body>`.
+  Parse a dialect type or a type alias, if present.
+  A dialect type has the form `!dialect.name`, `!dialect.name<body>` or `!name<body>`; a bare
+  `!name` is an alias.
 -/
 partial def parseOptionalDialectType : AttrParserM (Option TypeAttr) := do
   let startPos ← getPos
   let dialectName ← parseOptionalPrefixedKeyword .exclamationIdent
   let some dialectName := dialectName | return none
+  if let some type ← resolveOptionalTypeAlias startPos dialectName then
+    return some type
   if !(← getThe AttrParserState).allowUnregisteredDialect then
     throwAt startPos s!"type '!{String.fromUTF8! dialectName}' is not registered. \
       Consider using --allow-unregistered-dialect."
@@ -566,8 +608,7 @@ partial def parseOptionalCudaTilePointerType : AttrParserM (Option TypeAttr) := 
   if typeName ≠ "cuda_tile.ptr".toByteArray then return none
   let _ ← consumeToken
   parsePunctuation "<"
-  let some intTy ← parseOptionalIntegerType
-    | throwAtCurrentPos "integer type expected"
+  let intTy ← parseIntegerType
   parsePunctuation ">"
   return some (CudaTile.PointerType.mk intTy)
 
