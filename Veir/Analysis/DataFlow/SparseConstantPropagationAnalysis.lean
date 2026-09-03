@@ -67,5 +67,6 @@ def SparseConstantPropagationAnalysis : DataFlowAnalysis :=
     .sparseConstant
     SparseConstantPropagation.kind
     SparseConstantPropagation.transfer
+    (entryState := fun _ _ => ⊤)
 
 end Veir
