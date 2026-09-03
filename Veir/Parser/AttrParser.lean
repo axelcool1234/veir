@@ -59,6 +59,12 @@ def parseOptionalIntegerType : AttrParserM (Option IntegerType) := do
     return none
   | _ => return none
 
+/-- Parse the MLIR builtin `index` type. -/
+def parseOptionalIndexType : AttrParserM (Option IndexType) := do
+  if ← parseOptionalKeyword "index".toByteArray then
+    return some IndexType.mk
+  return none
+
 /--
   Parse an optional float type.
   A float type is represented as `f` followed by a positive integer indicating its width, e.g., `f32`.
@@ -1056,6 +1062,8 @@ partial def parseOptionalMatchOptionalType : AttrParserM (Option TypeAttr) := do
 partial def parseOptionalType : AttrParserM (Option TypeAttr) := do
   if let some integerType ← parseOptionalIntegerType then
     return some integerType
+  if let some indexType ← parseOptionalIndexType then
+    return some indexType
   if let some floatType ← parseOptionalFloatType then
     return some floatType
   if let some byteType ← parseOptionalByteType then
