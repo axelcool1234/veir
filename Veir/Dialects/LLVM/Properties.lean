@@ -515,6 +515,69 @@ def LLVMCondBrProperties.fromAttrDict (attrDict : Std.HashMap ByteArray Attribut
   return { branch_weights := weightsAttr, loop_annotation := annotation,
            operandSegmentSizes := sizesAttr }
 
+/--
+  Properties of `llvm.switch`. `case_operand_segments` splits the trailing case
+  operands one group per case; `operandSegmentSizes` splits the operands into
+  the value, the default destination's operands, and all case operands. The
+  optional `case_values` and `branch_weights` are omitted again when absent.
+
+  `case_values` is a dense elements attribute VeIR keeps as text, so the number
+  of case values is not checked against the number of cases here.
+-/
+structure LLVMSwitchProperties where
+  case_values : Option DenseElementsAttr
+  case_operand_segments : DenseArrayAttr
+  branch_weights : Option DenseArrayAttr
+  operandSegmentSizes : DenseArrayAttr
+deriving Inhabited, Repr, Hashable, DecidableEq
+
+def LLVMSwitchProperties.fromAttrDict (attrDict : Std.HashMap ByteArray Attribute) :
+    Except String LLVMSwitchProperties := do
+  if let some (key, _) := attrDict.toArray.find? (fun (k, _) =>
+      k ≠ "case_values".toUTF8 && k ≠ "case_operand_segments".toUTF8
+        && k ≠ "branch_weights".toUTF8 && k ≠ "operandSegmentSizes".toUTF8) then
+    throw s!"llvm.switch: unexpected property '{String.fromUTF8! key}'"
+  let caseValues ← match attrDict["case_values".toUTF8]? with
+    | some (.denseElementsAttr values) => .ok (some values)
+    | some attr =>
+      throw s!"llvm.switch: expected 'case_values' to be a dense elements attribute, but got {attr}"
+    | none => .ok none
+  let some segmentsAttr := attrDict["case_operand_segments".toUTF8]?
+    | throw "llvm.switch: missing 'case_operand_segments' property"
+  let .denseArrayAttr segmentsAttr := segmentsAttr
+    | throw s!"llvm.switch: expected 'case_operand_segments' to be a dense array attribute, but got {segmentsAttr}"
+  let weights ← match attrDict["branch_weights".toUTF8]? with
+    | some (.denseArrayAttr weights) => .ok (some weights)
+    | some attr =>
+      throw s!"llvm.switch: expected 'branch_weights' to be a dense array attribute, but got {attr}"
+    | none => .ok none
+  let some sizesAttr := attrDict["operandSegmentSizes".toUTF8]?
+    | throw "llvm.switch: missing 'operandSegmentSizes' property"
+  let .denseArrayAttr sizesAttr := sizesAttr
+    | throw s!"llvm.switch: expected 'operandSegmentSizes' to be a dense array attribute, but got {sizesAttr}"
+  return { case_values := caseValues, case_operand_segments := segmentsAttr,
+           branch_weights := weights, operandSegmentSizes := sizesAttr }
+
+/--
+  The case values as integers, `#[]` when the attribute is absent.
+
+  `case_values` is a dense elements attribute VeIR keeps as text, so its body --
+  `5` for one case, `[13, 35]` for several -- is read back here. `none` if the
+  body is not a list of integer literals.
+-/
+def LLVMSwitchProperties.caseValues? (props : LLVMSwitchProperties) : Option (Array Int) := do
+  let some attr := props.case_values | return #[]
+  /- Strip the brackets a multi-element body carries, and all whitespace. -/
+  let body := attr.value.foldl (init := "") fun acc c =>
+    if c = '[' || c = ']' || c = ' ' || c = '\t' || c = '\n' then acc else acc.push c
+  if body.isEmpty then
+    return #[]
+  let mut values : Array Int := #[]
+  for piece in body.splitOn "," do
+    let some value := piece.toInt? | none
+    values := values.push value
+  return values
+
 structure LLVMModuleFlagsProperties where
   flags : ArrayAttr
 deriving Inhabited, Repr, Hashable, DecidableEq
