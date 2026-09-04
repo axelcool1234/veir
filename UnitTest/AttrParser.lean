@@ -477,6 +477,21 @@ macro "#assert " e:term : command =>
 #assert expectSuccessAttr "#llvm.tailcallkind<none>" (TailCallKindAttr.mk "none")
 #assert expectSuccessAttr "#llvm.tailcallkind<musttail>" (TailCallKindAttr.mk "musttail")
 
+/-! ## LLVM constant ranges -/
+#assert expectSuccessAttr "#llvm.constant_range<i32, 0, 19>"
+  (ConstantRangeAttr.mk "i32, 0, 19")
+-- A wrapping range: LLVM allows `hi < lo`, and the bound reads back negative.
+#assert expectSuccessAttr "#llvm.constant_range<i32, 0, -7>"
+  (ConstantRangeAttr.mk "i32, 0, -7")
+
+/-! ## LLVM TBAA tags -/
+#assert expectSuccessAttr
+  "#llvm.tbaa_tag<base_type = <id = \"int\">, access_type = <id = \"int\">, offset = 0>"
+  (TbaaTagAttr.mk "base_type = <id = \"int\">, access_type = <id = \"int\">, offset = 0")
+#assert expectSuccessAttr
+  "#llvm.tbaa_tag<base_type = <id = \"a\", members = {<#llvm.tbaa_root<id = \"r\">, 0>}>, offset = 8>"
+  (TbaaTagAttr.mk "base_type = <id = \"a\", members = {<#llvm.tbaa_root<id = \"r\">, 0>}>, offset = 8")
+
 /-! ## CUDA Pointer type -/
 #assert expectSuccessType "!cuda_tile.ptr<i1>" (CudaTile.PointerType.mk (IntegerType.mk 1))
 #assert expectSuccessType "!cuda_tile.ptr<i32>" (CudaTile.PointerType.mk (IntegerType.mk 32))
