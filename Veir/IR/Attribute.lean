@@ -438,6 +438,17 @@ deriving Inhabited, Repr, DecidableEq, Hashable
 
 end HW
 
+namespace Seq
+
+/--
+  The `!seq.clock` type from CIRCT's seq dialect.
+  This represents a clock.
+-/
+structure ClockType
+deriving Inhabited, Repr, DecidableEq, Hashable
+
+end Seq
+
 mutual
 
 /--
@@ -653,6 +664,8 @@ inductive Attribute
 | pdlTypeType (type : PDL.TypeType)
 /-- Match optional handle type -/
 | matchOptionalType (type : Match.OptionalType)
+/-- CIRCT seq clock type -/
+| seqClockType (type : Seq.ClockType)
 deriving Inhabited, Repr, Hashable
 
 end
@@ -1043,6 +1056,8 @@ def Attribute.decEq (attr1 attr2 : Attribute) : Decidable (attr1 = attr2) := by
     exact (isTrue (by grind))
   case pdlTypeType.pdlTypeType type1 type2 =>
     exact (isTrue (by grind))
+  case seqClockType.seqClockType =>
+    exact (isTrue (by grind))
   all_goals exact isFalse (by grind)
 termination_by sizeOf attr1
 end
@@ -1257,6 +1272,10 @@ instance : ToString HW.ModuleType where
     let values := attr.ports.iter.map ToString.toString |>.intercalateString ", "
     s!"!hw.modty<{values}>"
 
+instance : ToString Seq.ClockType where
+  toString _ :=
+    s!"!seq.clock"
+
 mutual
 
 def VectorType.toString (type : VectorType) : String :=
@@ -1440,6 +1459,7 @@ def Attribute.toString (attr : Attribute) : String :=
   | .pdlValueType type => ToString.toString type
   | .pdlTypeType type => ToString.toString type
   | .matchOptionalType type => type.toString
+  | .seqClockType type => ToString.toString type
 termination_by sizeOf attr
 
 end
@@ -1712,6 +1732,7 @@ def isType (attr : Attribute) : Bool :=
   | .pdlValueType _ => true
   | .pdlTypeType _ => true
   | .matchOptionalType _ => true
+  | .seqClockType _ => true
 
 /--
   Returns the size, in bits, that an LLVM type would use if stored to memory.
@@ -1817,6 +1838,8 @@ theorem isType_pdlOperationType type : (pdlOperationType type).isType = true := 
 theorem isType_pdlValueType type : (pdlValueType type).isType = true := by rfl
 @[simp, grind =]
 theorem isType_pdlTypeType type : (pdlTypeType type).isType = true := by rfl
+@[simp, grind =]
+theorem isType_seqClockType type : (seqClockType type).isType = true := by rfl
 
 end Attribute
 
@@ -2075,6 +2098,10 @@ instance : IsTypeAttr TypeAttr where
   project_eq_some_iff _ _ := by
     simp only [Option.dite_none_right_eq_some, Option.some.injEq, TypeAttr.inj]
     grind
+
+instance : IsTypeAttr Seq.ClockType where
+  coe type := Attribute.asType (.seqClockType type) (by rfl)
+  coe_eq_inject _ := by rfl
 
 end
 end Veir
