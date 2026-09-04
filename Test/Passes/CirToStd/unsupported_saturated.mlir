@@ -1,7 +1,7 @@
 // RUN: not veir-opt %s -p=cir-to-std 2>&1 | filecheck %s
 
-// Saturating arithmetic has no arith counterpart.
-// CHECK: Error while applying cir-to-std lowering
+// Saturating arithmetic has no arith counterpart; strict mode reports it.
+// CHECK: cir-to-std: operation 'cir.add' was not lowered
 
 "builtin.module"() ({
   "cir.func"() <{function_type = !cir.func<(!cir.int<s, 32>) -> !cir.int<s, 32>>, sym_name = "f"}> ({

@@ -1,7 +1,7 @@
 // RUN: not veir-opt %s -p=cir-to-std 2>&1 | filecheck %s
 
-// A bitcast (kind 1) round-trips but has no lowering.
-// CHECK: Error while applying cir-to-std lowering
+// A bitcast (kind 1) round-trips but has no lowering; strict mode reports it.
+// CHECK: cir-to-std: operation 'cir.cast' was not lowered
 "builtin.module"() ({
   "cir.func"() <{function_type = !cir.func<(!cir.int<s, 32>) -> !cir.int<u, 32>>, sym_name = "f"}> ({
   ^bb0(%a : !cir.int<s, 32>):

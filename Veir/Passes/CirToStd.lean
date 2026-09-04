@@ -21,6 +21,11 @@ namespace Veir
   successor's argument types. The function boundary is left to
   `coerce-cir-function-boundaries` and the cast round trips to `reconcile-cast`; the `cir`
   pass group chains them.
+
+  Operations the pass cannot lower (unmodelled types, constant values or cast kinds,
+  saturating arithmetic) are left in place. By default the pass then fails, since the `cir`
+  pipeline expects a complete lowering; with `cir-to-std{strict=false}` they survive alongside
+  the lowered operations, which is how ClangIR output with unmodelled pieces is explored.
 -/
 
 /-! ## Types -/
@@ -99,19 +104,23 @@ abbrev StdBuilder :=
 /--
   Lower a single-result `cir` operation `cirOp` with `numOperands` operands: cast the operands
   to builtin types, run `build`, cast the result back to the operation's `cir` result type,
-  and erase the operation. `build` may inspect the properties; returning `none` from it aborts
-  the pass, which is how unsupported flags are reported.
+  and erase the operation. The operation is left in place when `supported` rejects its
+  properties or when one of its types has no builtin counterpart; the pass reports such
+  leftovers in strict mode. `build` returning `none` is an internal failure that aborts the
+  pass.
 -/
-def lowerValueOp (cirOp : Cir) (numOperands : Nat)
-    (build : Cir.propertiesOf cirOp → StdBuilder)
+def lowerValueOpIf (cirOp : Cir) (numOperands : Nat)
+    (supported : Cir.propertiesOf cirOp → Bool) (build : Cir.propertiesOf cirOp → StdBuilder)
     (rewriter : PatternRewriter OpCode) (op : OperationPtr)
     (_opInBounds : op.InBounds rewriter.ctx.raw) : Option (PatternRewriter OpCode) := do
   let some (operands, props) := matchOp op rewriter.ctx.raw cirOp numOperands
     | return rewriter
+  if !supported props then return rewriter
   let ip := InsertPoint.before op
   let cirResultType := (op.getResult 0 : ValuePtr).getType! rewriter.ctx.raw
-  let some stdResultType := cirTypeToStd cirResultType | none
+  let some stdResultType := cirTypeToStd cirResultType | return rewriter
   let cirOperandTypes := operands.map (·.getType! rewriter.ctx.raw)
+  if cirOperandTypes.any (fun t => (cirTypeToStd t).isNone) then return rewriter
   let mut rw := rewriter
   let mut stdOperands : Array ValuePtr := #[]
   for v in operands do
@@ -123,21 +132,27 @@ def lowerValueOp (cirOp : Cir) (numOperands : Nat)
   let rewriter := rewriter.replaceValue! (op.getResult 0) back
   return rewriter.eraseOp! op
 
-/-- `cir.const` → `arith.constant`. -/
-def lowerConst := lowerValueOp .const 0 fun props rewriter _ _ resultType ip => do
+/-- `lowerValueOpIf` for operations whose every property variant is supported. -/
+def lowerValueOp (cirOp : Cir) (numOperands : Nat) (build : Cir.propertiesOf cirOp → StdBuilder) :=
+  lowerValueOpIf cirOp numOperands (fun _ => true) build
+
+/-- `cir.const` → `arith.constant`; unmodelled constant values are left in place. -/
+def lowerConst := lowerValueOpIf .const 0 (fun props => props.value matches .int _ | .bool _)
+    fun props rewriter _ _ resultType ip => do
   let .integerType rt := resultType.val | none
   match props.value with
   | .int attr => emitStdConstant rewriter attr.value rt.bitwidth ip
   | .bool attr => emitStdConstant rewriter (if attr.value then 1 else 0) rt.bitwidth ip
+  | .other _ => none
 
-/-- `cir.add` → `arith.addi`; the saturating form is rejected. -/
-def lowerAdd := lowerValueOp .add 2 fun props rewriter operands _ resultType ip => do
-  if props.flagSet "saturated" then none
+/-- `cir.add` → `arith.addi`; the saturating form is left in place. -/
+def lowerAdd := lowerValueOpIf .add 2 (fun props => !props.flagSet "saturated")
+    fun _ rewriter operands _ resultType ip =>
   emitArith rewriter .addi noOverflow resultType operands ip
 
-/-- `cir.sub` → `arith.subi`; the saturating form is rejected. -/
-def lowerSub := lowerValueOp .sub 2 fun props rewriter operands _ resultType ip => do
-  if props.flagSet "saturated" then none
+/-- `cir.sub` → `arith.subi`; the saturating form is left in place. -/
+def lowerSub := lowerValueOpIf .sub 2 (fun props => !props.flagSet "saturated")
+    fun _ rewriter operands _ resultType ip =>
   emitArith rewriter .subi noOverflow resultType operands ip
 
 /-- A binary operation whose `arith` counterpart does not depend on signedness. -/
@@ -211,8 +226,10 @@ def lowerCmp := lowerValueOp .cmp 2 fun props rewriter operands cirTypes resultT
 def lowerSelect := lowerValueOp .select 3 fun _ rewriter operands _ resultType ip =>
   emitArith rewriter .select () resultType operands ip
 
-/-- `cir.cast` for the integral, int_to_bool and bool_to_int kinds. -/
-def lowerCast := lowerValueOp .cast 1 fun props rewriter operands cirTypes resultType ip => do
+/-- `cir.cast` for the integral, int_to_bool and bool_to_int kinds; other kinds are left in place. -/
+def lowerCast := lowerValueOpIf .cast 1
+    (fun props => props.kind matches .integral | .int_to_bool | .bool_to_int)
+    fun props rewriter operands cirTypes resultType ip => do
   let src := operands[0]!
   let .integerType st := (src.getType! rewriter.ctx.raw).val | none
   let .integerType rt := resultType.val | none
@@ -312,7 +329,7 @@ def convertCirBlock (ctx : WfIRContext OpCode) (block : BlockPtr) : WfIRContext 
 
 /-! ## Pass implementation -/
 
-def CirToStdPass.impl (ctx : WfIRContext OpCode) (op : OperationPtr)
+def CirToStdPass.impl (strict : Bool) (ctx : WfIRContext OpCode) (op : OperationPtr)
     (_ : op.InBounds ctx.raw) : ExceptT String IO (WfIRContext OpCode) := do
   let lowering := RewritePattern.GreedyRewritePattern #[
     lowerConst, lowerAdd, lowerSub, lowerMul, lowerDiv, lowerRem,
@@ -321,21 +338,25 @@ def CirToStdPass.impl (ctx : WfIRContext OpCode) (op : OperationPtr)
     lowerBr, lowerBrCond, lowerUnreachable
   ]
   let some lowered := RewritePattern.applyInContext lowering ctx
-    | throw "Error while applying cir-to-std lowering (unsupported operation or flag)"
+    | throw "cir-to-std: internal rewriter failure"
   -- The lowered branches still forward `cir` values: retype the blocks they target.
   let mut converted := lowered
   for block in converted.raw.blocks.keys do
     converted := convertCirBlock converted block
-  -- Nothing but the function shell may remain.
-  for o in converted.raw.operations.keys do
-    if let .cir cirOp := o.getOpType! converted.raw then
-      if cirOp ≠ .func && cirOp ≠ .return then
-        throw s!"cir-to-std: operation '{String.fromUTF8! (IsOpCode.name cirOp)}' was not lowered"
+  -- In strict mode, nothing but the function shell may remain.
+  if strict then
+    for o in converted.raw.operations.keys do
+      if let .cir cirOp := o.getOpType! converted.raw then
+        if cirOp ≠ .func && cirOp ≠ .return then
+          throw s!"cir-to-std: operation '{String.fromUTF8! (IsOpCode.name cirOp)}' was not lowered"
   return converted
 
 public def CirToStdPass : Pass OpCode :=
   { name := "cir-to-std"
     description := "Lower the cir dialect's integer core to the arith, cf and llvm dialects."
-    run := fun _ => CirToStdPass.impl }
+    options := .ofList [
+      ("strict", { description := "Fail if a cir operation other than cir.func/cir.return remains.",
+                   defaultValue := true })]
+    run := fun options => CirToStdPass.impl ((options.get? "strict").getD true) }
 
 end Veir
