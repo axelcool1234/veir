@@ -74,6 +74,7 @@ inductive AnalysisKind where
   | test
   | sparseConstantPropagation
   | integerRange
+  | modArithRange
 deriving BEq, Hashable, Repr, DecidableEq
 
 /--
@@ -87,6 +88,7 @@ inductive FactKind where
   | test
   | sparseConstant
   | integerRange
+  | modArithRange
 deriving BEq, ReflBEq, LawfulBEq, Hashable, Repr, DecidableEq
 
 abbrev WorkItem := InsertPoint × AnalysisKind
@@ -128,6 +130,7 @@ The fact specific data stored for each fact kind.
   | .test => SparsePayload TestDomain
   | .sparseConstant => SparsePayload AbstractConstant
   | .integerRange => SparsePayload IntegerRangeLattice
+  | .modArithRange => SparsePayload IntegerRangeLattice
 
 /--
 A dataflow fact stored by the framework.
