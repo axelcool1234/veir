@@ -20,6 +20,11 @@ easy to combine MLIR and VeIR tools.
 Common tasks are wrapped in the [`Makefile`](Makefile): `make build` to build and
 `make tests` to run the tests. Run `make` to list every target.
 
+With Nix, `nix develop` enters a development shell containing Lean's toolchain
+manager and all native and Python dependencies needed by those Make targets.
+The targets can also be run directly as flake apps with `nix run .#build` and
+`nix run .#tests`; `nix run .` displays the Makefile help.
+
 Our testing framework is split into two parts: unit tests written in Lean and
 [FileCheck](https://llvm.org/docs/CommandGuide/FileCheck.html) tests for the
 command line tool `veir-opt`. The FileCheck tests require
