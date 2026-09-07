@@ -59,6 +59,7 @@ inductive Llvm where
 | load
 | store
 | getelementptr
+| insertvalue
 | call
 | call_intrinsic
 | return
@@ -124,6 +125,7 @@ match op with
 | .load => LoadProperties
 | .store => StoreProperties
 | .getelementptr => GetelementptrProperties
+| .insertvalue => LLVMInsertValueProperties
 | .fadd | .fsub | .fmul | .fdiv | .frem | .fneg | .intr__fmuladd | .intr__fabs =>
   FastMathFlagsProperties
 | .fcmp => FcmpProperties
@@ -166,6 +168,7 @@ def Llvm.fromAttrDict
   case load => exact LoadProperties.fromAttrDict attrDict
   case store => exact StoreProperties.fromAttrDict attrDict
   case getelementptr => exact GetelementptrProperties.fromAttrDict attrDict
+  case insertvalue => exact LLVMInsertValueProperties.fromAttrDict attrDict
   case fadd | fsub | fmul | fdiv | frem | fneg | intr__fmuladd | intr__fabs =>
     exact FastMathFlagsProperties.fromAttrDict attrDict
   case fcmp => exact FcmpProperties.fromAttrDict attrDict
@@ -340,6 +343,9 @@ def Llvm.toAttrDict
     dict := dict.insert "noalias_scopes".toUTF8 (.arrayAttr props.noalias_scopes)
     dict := dict.insert "tbaa".toUTF8 (.arrayAttr props.tbaa)
     dict
+  | .insertvalue =>
+    (Std.HashMap.emptyWithCapacity 1).insert
+      "position".toUTF8 (Attribute.denseArrayAttr props.position)
   | .getelementptr => Id.run do
     let mut dict := Std.HashMap.emptyWithCapacity 3
     dict := dict.insert
@@ -394,7 +400,7 @@ def Llvm.getEffects (op : Llvm) (props : Llvm.propertiesOf op) : MemoryEffects :
   | .intr__fshl, _ | .intr__fshr, _
   | .icmp, _ | .select, _
   | .trunc, _ | .sext, _ | .zext, _
-  | .getelementptr, _
+  | .getelementptr, _ | .insertvalue, _
   | .br, _ | .cond_br, _ | .switch, _ | .return, _
   | .freeze, _ | .bitcast, _
   | .inttoptr, _ | .ptrtoint, _
@@ -451,7 +457,8 @@ def Llvm.propagatesPoison : Llvm → Bool
   | .select | .br | .cond_br | .switch | .unreachable | .alloca | .load | .store
   | .intr__lifetime__start | .intr__lifetime__end | .intr__assume
   | .intr__memset | .intr__memcpy | .intr__memmove
-  | .getelementptr | .call | .call_intrinsic | .return | .func | .module_flags
+  | .getelementptr | .insertvalue | .call | .call_intrinsic | .return | .func
+  | .module_flags
   | .freeze => false
 
 instance : IsOpCode Llvm where
@@ -830,6 +837,38 @@ def Llvm.verifyLocalInvariants {OpInfo : Type} [IsOpCode OpInfo]
     if properties.alignment.type.bitwidth ≠ 64 then
       throw "'llvm.store' op attribute 'alignment' failed to satisfy constraint: 64-bit signless integer attribute"
     pure ()
+  | .insertvalue => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyPlainOpCounts ctx opIn 2 1
+    let props := op.getProperties! ctx.raw Llvm.insertvalue
+    if props.position.elementType.bitwidth ≠ 64 then
+      throw "Expected 'position' to be an i64 dense array attribute"
+    let containerType := (op.getOperand! ctx.raw 0).getType! ctx.raw
+    let valueType := (op.getOperand! ctx.raw 1).getType! ctx.raw
+    op.verifyResultTypeMatches ctx containerType "Expected the result to have the container type"
+    let isStruct : Attribute → Bool
+      | .unregisteredAttr attr => attr.isType && attr.value.startsWith "!llvm.struct"
+      | _ => false
+    let isArray : Attribute → Bool
+      | .llvmArrayType _ => true
+      | _ => false
+    if !(isArray containerType.val || isStruct containerType.val) then
+      throw s!"Expected an aggregate container, but got {containerType}"
+    for index in props.position.values do
+      if index < 0 then
+        throw s!"position out of bounds: {index}"
+    /- Arrays are modelled, so their indices and element types are checked.
+       Struct bodies are opaque, so the walk trusts everything below a struct. -/
+    let mut current := containerType.val
+    for index in props.position.values do
+      let .llvmArrayType arrType := current
+        | if isStruct current then return
+          throw s!"Expected LLVM IR structure/array type, got: {current}"
+      if index ≥ arrType.size then
+        throw s!"position out of bounds: {index}"
+      current := arrType.type
+    if current ≠ valueType.val then
+      throw s!"Type mismatch: cannot insert {valueType} into {containerType}"
   | .getelementptr => do
     op.checkIsNonNullIntegerType ctx opIn
     let props := op.getProperties! ctx.raw Llvm.getelementptr
