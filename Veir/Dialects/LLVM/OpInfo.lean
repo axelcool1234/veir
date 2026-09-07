@@ -68,6 +68,15 @@ inductive Llvm where
 | fmul
 | fdiv
 | frem
+| fneg
+| fcmp
+| sitofp
+| uitofp
+| fptosi
+| fptoui
+| fpext
+| intr__fmuladd
+| intr__fabs
 | freeze
 | bitcast
 | inttoptr
@@ -104,7 +113,7 @@ match op with
 | .intr__assume => LLVMAssumeProperties
 | .or => DisjointProperties
 | .trunc => NswNuwProperties
-| .zext => NnegProperties
+| .zext | .uitofp => NnegProperties
 | .icmp => IcmpProperties
 | .br => LLVMBrProperties
 | .cond_br => LLVMCondBrProperties
@@ -114,7 +123,9 @@ match op with
 | .load => LoadProperties
 | .store => StoreProperties
 | .getelementptr => GetelementptrProperties
-| .fadd | .fsub | .fmul | .fdiv | .frem => FastMathFlagsProperties
+| .fadd | .fsub | .fmul | .fdiv | .frem | .fneg | .intr__fmuladd | .intr__fabs =>
+  FastMathFlagsProperties
+| .fcmp => FcmpProperties
 | .call => LLVMCallProperties
 | .func => LLVMFuncProperties
 | .module_flags => LLVMModuleFlagsProperties
@@ -138,7 +149,7 @@ def Llvm.fromAttrDict
   case intr__abs => exact IntMinPoisonProperties.fromAttrDict attrDict
   case intr__assume => exact LLVMAssumeProperties.fromAttrDict attrDict
   case or => exact DisjointProperties.fromAttrDict attrDict
-  case zext => exact NnegProperties.fromAttrDict attrDict
+  case zext | uitofp => exact NnegProperties.fromAttrDict attrDict
   case icmp => exact IcmpProperties.fromAttrDict attrDict
   case br => exact LLVMBrProperties.fromAttrDict attrDict
   case cond_br => exact LLVMCondBrProperties.fromAttrDict attrDict
@@ -153,8 +164,9 @@ def Llvm.fromAttrDict
   case load => exact LoadProperties.fromAttrDict attrDict
   case store => exact StoreProperties.fromAttrDict attrDict
   case getelementptr => exact GetelementptrProperties.fromAttrDict attrDict
-  case fadd | fsub | fmul | fdiv | frem =>
+  case fadd | fsub | fmul | fdiv | frem | fneg | intr__fmuladd | intr__fabs =>
     exact FastMathFlagsProperties.fromAttrDict attrDict
+  case fcmp => exact FcmpProperties.fromAttrDict attrDict
   case func => exact LLVMFuncProperties.fromAttrDict attrDict
   case module_flags => exact LLVMModuleFlagsProperties.fromAttrDict attrDict
   case call => exact LLVMCallProperties.fromAttrDict attrDict
@@ -206,9 +218,15 @@ def Llvm.toAttrDict
       let attr := IntegerAttr.mk (Int.ofNat val) (IntegerType.mk 32)
       dict := dict.insert "overflowFlags".toUTF8 (Attribute.integerAttr attr)
     dict
-  | .fadd | .fsub | .fmul | .fdiv | .frem =>
+  | .fadd | .fsub | .fmul | .fdiv | .frem | .fneg | .intr__fmuladd | .intr__fabs =>
     (Std.HashMap.emptyWithCapacity 1).insert
       "fastmathFlags".toUTF8 (Attribute.fastMathFlagsAttr props.attr)
+  | .fcmp => Id.run do
+    let mut dict := Std.HashMap.emptyWithCapacity 2
+    dict := dict.insert "fastmathFlags".toUTF8 (Attribute.fastMathFlagsAttr props.fastmathFlags)
+    let value := IntegerAttr.mk (Int.ofNat props.predicate.toNat) (IntegerType.mk 64)
+    dict := dict.insert "predicate".toUTF8 (Attribute.integerAttr value)
+    dict
   | .icmp =>
     let value := IntegerAttr.mk (Int.ofNat props.predicate.toNat) (IntegerType.mk 64)
     (Std.HashMap.emptyWithCapacity 1).insert
@@ -261,7 +279,7 @@ def Llvm.toAttrDict
     if props.disjoint then
       dict := dict.insert "disjoint".toUTF8 (Attribute.unitAttr UnitAttr.mk)
     dict
-  | .zext => props.toAttrDict
+  | .zext | .uitofp => props.toAttrDict
   | .intr__ctlz | .intr__cttz =>
     let value := if props.is_zero_poison then 1 else 0
     let attr := IntegerAttr.mk value (IntegerType.mk 1)
@@ -368,7 +386,9 @@ def Llvm.getEffects (op : Llvm) (props : Llvm.propertiesOf op) : MemoryEffects :
   | .intr__sadd__sat, _ | .intr__uadd__sat, _
   | .intr__ssub__sat, _ | .intr__usub__sat, _
   | .intr__sshl__sat, _ | .intr__ushl__sat, _
-  | .fadd, _ | .fsub, _ | .fmul, _ | .fdiv, _ | .frem, _ => .none
+  | .fadd, _ | .fsub, _ | .fmul, _ | .fdiv, _ | .frem, _
+  | .fneg, _ | .fcmp, _ | .sitofp, _ | .uitofp, _ | .fptosi, _ | .fptoui, _
+  | .fpext, _ | .intr__fmuladd, _ | .intr__fabs, _ => .none
   -- For everything else: be conservative!
   | _, _ => .unknown
 
@@ -407,6 +427,8 @@ def Llvm.propagatesPoison : Llvm → Bool
   -- `RuntimeValue` represents a poisoned float yet, so listing them here would
   -- claim a fold that cannot be materialized.
   | .fadd | .fsub | .fmul | .fdiv | .frem
+  | .fneg | .fcmp | .sitofp | .uitofp | .fptosi | .fptoui | .fpext
+  | .intr__fmuladd | .intr__fabs
   | .mlir__constant | .mlir__poison | .mlir__undef | .mlir__zero | .mlir__global
   | .mlir__addressof
   | .select | .br | .cond_br | .switch | .unreachable | .alloca | .load | .store
@@ -837,6 +859,24 @@ def Llvm.verifyLocalInvariants {OpInfo : Type} [IsOpCode OpInfo]
   | .fadd | .fsub | .fmul | .fdiv | .frem => do
     op.checkIsNonNullIntegerType ctx opIn
     op.verifyFloatBinop ctx opIn
+  | .fneg | .intr__fabs => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyFloatUnop ctx opIn
+  | .intr__fmuladd => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyFloatTernop ctx opIn
+  | .fcmp => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyFCmp ctx opIn
+  | .sitofp | .uitofp => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyIntToFloatTypes ctx opIn
+  | .fptosi | .fptoui => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyFloatToIntTypes ctx opIn
+  | .fpext => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyFloatExtTypes ctx opIn
   | .module_flags => do
     op.checkIsNonNullIntegerType ctx opIn
     op.verifyPlainOpCounts ctx opIn 0 0
