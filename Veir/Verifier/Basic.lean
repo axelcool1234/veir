@@ -99,6 +99,8 @@ def OperationPtr.verifyOperandSegmentSizes
     (sizes : DenseArrayAttr) (expectedSegments : Nat) :
     Except String (Array Nat) := do
   let instrName := String.fromUTF8! (IsOpCode.name (op.getOpType ctx.raw opIn))
+  if sizes.elementType.bitwidth ≠ 32 then
+    throw s!"{instrName}: Expected 'operandSegmentSizes' to be an i32 dense array attribute"
   if sizes.values.size ≠ expectedSegments then
     throw s!"{instrName}: operandSegmentSizes expected {expectedSegments} entries, got {sizes.values.size}"
   let mut segmentSizes : Array Nat := #[]
@@ -110,6 +112,24 @@ def OperationPtr.verifyOperandSegmentSizes
   if segmentSum ≠ op.getNumOperands ctx.raw opIn then
     throw s!"{instrName}: operandSegmentSizes describes {segmentSum} operands, got {op.getNumOperands ctx.raw opIn}"
   return segmentSizes
+
+/--
+  Check the operand bundles described by `op_bundle_sizes` and `op_bundle_tags`
+  as MLIR's `verifyOperandBundles` does, and return the number of bundle operands.
+-/
+def verifyOperandBundles (sizes : DenseArrayAttr) (tags : Option ArrayAttr) :
+    Except String Nat := do
+  if sizes.elementType.bitwidth ≠ 32 then
+    throw "Expected 'op_bundle_sizes' to be an i32 dense array attribute"
+  if sizes.values.any (· < 0) then
+    throw "op_bundle_sizes contains a negative size"
+  let tags := (tags.map (·.value)).getD #[]
+  if tags.size ≠ sizes.values.size then
+    throw s!"Expected {sizes.values.size} operand bundle tag(s), but got {tags.size}"
+  for tag in tags do
+    let .stringAttr _ := tag
+      | throw "Expected operand bundle tags to be string attributes"
+  return (sizes.values.foldl (· + ·) 0).toNat
 
 def OperationPtr.verifyCondBranchOperandSegmentSizes
     (op : OperationPtr) (ctx : WfIRContext OpInfo) (opIn : op.InBounds ctx.raw)
@@ -419,6 +439,32 @@ def OperationPtr.verifyIntegerExtTypes (op : OperationPtr)
     throw s!"{instrName}: Operand's width must be smaller than result's width"
   else
     pure ()
+
+/--
+  Whether `type` is compatible with the LLVM dialect: integers, floats,
+  pointers, arrays and vectors of compatible types, void, and the `!llvm.*`
+  types VeIR keeps opaque, such as structs.
+-/
+partial def Attribute.isLLVMCompatibleType : Attribute → Bool
+  | .integerType _ | .floatType _ | .llvmPointerType _ | .llvmVoidType _ => true
+  | .llvmArrayType arrType => arrType.type.isLLVMCompatibleType
+  | .vectorType vecType => vecType.elementType.isLLVMCompatibleType
+  | .unregisteredAttr attr => attr.isType && attr.value.startsWith "!llvm."
+  | _ => false
+
+/-- Check that every operand and result has an LLVM dialect-compatible type. -/
+def OperationPtr.verifyLLVMCompatibleTypes (op : OperationPtr)
+    (ctx : WfIRContext OpInfo)
+    (opIn : op.InBounds ctx.raw) : Except String PUnit := do
+  let instrName := String.fromUTF8! (IsOpCode.name (op.getOpType ctx.raw opIn))
+  let opTypes := op.getOperandTypes! ctx.raw
+  for i in [0:opTypes.size] do
+    if !(opTypes[i]!).val.isLLVMCompatibleType then
+      throw s!"{instrName}: operand {i} must be an LLVM dialect-compatible type, but got {opTypes[i]!}"
+  for i in [0:op.getNumResults ctx.raw opIn] do
+    let type := ((op.getResult i).get! ctx.raw).type
+    if !type.val.isLLVMCompatibleType then
+      throw s!"{instrName}: result {i} must be an LLVM dialect-compatible type, but got {type}"
 
 /--
   Reject any operand or result whose type is a zero-width integer (`i0`).
