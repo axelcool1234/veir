@@ -607,6 +607,74 @@ def LLVMSwitchProperties.caseValues? (props : LLVMSwitchProperties) : Option (Ar
     values := values.push value
   return values
 
+/--
+  An optional array-valued property, absent when the attribute is not there.
+-/
+private def optionalArrayAttr (opName name : String)
+    (attrDict : Std.HashMap ByteArray Attribute) : Except String (Option ArrayAttr) :=
+  match attrDict[name.toUTF8]? with
+  | some (.arrayAttr value) => .ok (some value)
+  | some attr => .error s!"{opName}: expected '{name}' to be an array attribute, but got {attr}"
+  | none => .ok none
+
+/--
+  Properties of the memory intrinsics `memset`, `memcpy`, and `memmove`.
+-/
+structure LLVMMemIntrinsicProperties where
+  isVolatile : Bool
+  arg_attrs : Option ArrayAttr
+  res_attrs : Option ArrayAttr
+  access_groups : Option ArrayAttr
+  alias_scopes : Option ArrayAttr
+  noalias_scopes : Option ArrayAttr
+  tbaa : Option ArrayAttr
+deriving Inhabited, Repr, Hashable, DecidableEq
+
+/--
+  An optional array of dictionaries, as MLIR requires of `arg_attrs` and
+  `res_attrs`. MLIR does not check the array's length against the operand or
+  result count, so neither does this.
+-/
+private def optionalDictArrayAttr (opName name : String)
+    (attrDict : Std.HashMap ByteArray Attribute) : Except String (Option ArrayAttr) := do
+  let some value ← optionalArrayAttr opName name attrDict
+    | return none
+  if value.value.any (fun attr => match attr with | .dictionaryAttr _ => false | _ => true) then
+    throw s!"{opName}: attribute '{name}' failed to satisfy constraint: \
+      Array of dictionary attributes"
+  return some value
+
+def LLVMMemIntrinsicProperties.fromAttrDictFor (opName : String)
+    (attrDict : Std.HashMap ByteArray Attribute) :
+    Except String LLVMMemIntrinsicProperties := do
+  if let some (key, _) := attrDict.toArray.find? (fun (k, _) =>
+      k ≠ "isVolatile".toUTF8 && k ≠ "arg_attrs".toUTF8 && k ≠ "res_attrs".toUTF8
+        && k ≠ "access_groups".toUTF8 && k ≠ "alias_scopes".toUTF8
+        && k ≠ "noalias_scopes".toUTF8 && k ≠ "tbaa".toUTF8
+        && k ≠ "op_bundle_sizes".toUTF8 && k ≠ "op_bundle_tags".toUTF8) then
+    throw s!"{opName}: unexpected property '{String.fromUTF8! key}'"
+  let some volatileAttr := attrDict["isVolatile".toUTF8]?
+    | throw s!"{opName}: missing 'isVolatile' property"
+  let .integerAttr volatileAttr := volatileAttr
+    | throw s!"{opName}: expected 'isVolatile' to be an i1 integer attribute, but got {volatileAttr}"
+  if volatileAttr.type.bitwidth ≠ 1 then
+    throw s!"{opName}: expected 'isVolatile' to be an i1 integer attribute, but got i{volatileAttr.type.bitwidth}"
+  let argAttrs ← optionalDictArrayAttr opName "arg_attrs" attrDict
+  let resAttrs ← optionalDictArrayAttr opName "res_attrs" attrDict
+  let accessGroups ← optionalArrayAttr opName "access_groups" attrDict
+  let aliasScopes ← optionalArrayAttr opName "alias_scopes" attrDict
+  let noaliasScopes ← optionalArrayAttr opName "noalias_scopes" attrDict
+  let tbaa ← optionalArrayAttr opName "tbaa" attrDict
+  /- Parse and drop `op_bundle_sizes` and `op_bundle_tags` to match MLIR. -/
+  return { isVolatile := volatileAttr.value ≠ 0, arg_attrs := argAttrs,
+           res_attrs := resAttrs, access_groups := accessGroups,
+           alias_scopes := aliasScopes, noalias_scopes := noaliasScopes,
+           tbaa := tbaa }
+
+def LLVMMemIntrinsicProperties.fromAttrDict (attrDict : Std.HashMap ByteArray Attribute) :
+    Except String LLVMMemIntrinsicProperties :=
+  LLVMMemIntrinsicProperties.fromAttrDictFor "llvm.intr.memset" attrDict
+
 structure LLVMModuleFlagsProperties where
   flags : ArrayAttr
 deriving Inhabited, Repr, Hashable, DecidableEq

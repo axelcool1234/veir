@@ -32,6 +32,9 @@ inductive Llvm where
 | intr__cttz
 | intr__lifetime__start
 | intr__lifetime__end
+| intr__memset
+| intr__memcpy
+| intr__memmove
 | intr__ctpop
 | intr__bswap
 | intr__bitreverse
@@ -106,6 +109,7 @@ match op with
 | .br => LLVMBrProperties
 | .cond_br => LLVMCondBrProperties
 | .switch => LLVMSwitchProperties
+| .intr__memset | .intr__memcpy | .intr__memmove => LLVMMemIntrinsicProperties
 | .alloca => AllocaProperties
 | .load => LoadProperties
 | .store => StoreProperties
@@ -139,6 +143,12 @@ def Llvm.fromAttrDict
   case br => exact LLVMBrProperties.fromAttrDict attrDict
   case cond_br => exact LLVMCondBrProperties.fromAttrDict attrDict
   case switch => exact LLVMSwitchProperties.fromAttrDict attrDict
+  case intr__memset =>
+    exact LLVMMemIntrinsicProperties.fromAttrDictFor "llvm.intr.memset" attrDict
+  case intr__memcpy =>
+    exact LLVMMemIntrinsicProperties.fromAttrDictFor "llvm.intr.memcpy" attrDict
+  case intr__memmove =>
+    exact LLVMMemIntrinsicProperties.fromAttrDictFor "llvm.intr.memmove" attrDict
   case alloca => exact AllocaProperties.fromAttrDict attrDict
   case load => exact LoadProperties.fromAttrDict attrDict
   case store => exact StoreProperties.fromAttrDict attrDict
@@ -216,6 +226,19 @@ def Llvm.toAttrDict
       dict := dict.insert "loop_annotation".toUTF8 (.loopAnnotationAttr annotation)
     dict := dict.insert "operandSegmentSizes".toUTF8
       (Attribute.denseArrayAttr props.operandSegmentSizes)
+    dict
+  | .intr__memset | .intr__memcpy | .intr__memmove => Id.run do
+    let mut dict := Std.HashMap.emptyWithCapacity 6
+    let volatileAttr := IntegerAttr.mk (if props.isVolatile then 1 else 0) (IntegerType.mk 1)
+    dict := dict.insert "isVolatile".toUTF8 (.integerAttr volatileAttr)
+    for (name, value) in [("arg_attrs", props.arg_attrs),
+                          ("res_attrs", props.res_attrs),
+                          ("access_groups", props.access_groups),
+                          ("alias_scopes", props.alias_scopes),
+                          ("noalias_scopes", props.noalias_scopes),
+                          ("tbaa", props.tbaa)] do
+      if let some value := value then
+        dict := dict.insert name.toUTF8 (.arrayAttr value)
     dict
   | .switch => Id.run do
     let mut dict := Std.HashMap.emptyWithCapacity 4
@@ -392,6 +415,7 @@ def Llvm.propagatesPoison : Llvm → Bool
   | .mlir__addressof
   | .select | .br | .cond_br | .switch | .unreachable | .alloca | .load | .store
   | .intr__lifetime__start | .intr__lifetime__end | .intr__assume
+  | .intr__memset | .intr__memcpy | .intr__memmove
   | .getelementptr | .call | .return | .func | .module_flags | .freeze => false
 
 instance : IsOpCode Llvm where
@@ -485,6 +509,16 @@ def OperationPtr.verifyLLVMICmp {OpInfo : Type} [IsOpCode OpInfo]
     s!"{instrName}: Expected operands to have the same type"
   ((op.getResult 0).get! ctx.raw).type.verifyI1 s!"{instrName}: Expected i1 result"
 
+/-- The properties of a memory intrinsic, whichever of the three it is. -/
+private def memIntrinsicProperties {OpInfo : Type} [IsOpCode OpInfo]
+    [HasDialect OpInfo Llvm] (opType : Llvm) (op : OperationPtr)
+    (ctx : WfIRContext OpInfo) : Option LLVMMemIntrinsicProperties :=
+  match opType with
+  | .intr__memset => some (op.getProperties! ctx.raw Llvm.intr__memset)
+  | .intr__memcpy => some (op.getProperties! ctx.raw Llvm.intr__memcpy)
+  | .intr__memmove => some (op.getProperties! ctx.raw Llvm.intr__memmove)
+  | _ => none
+
 /--
 Verify the local invariants of an `llvm` operation in any operation-info type
 containing the `llvm` dialect.
@@ -577,6 +611,35 @@ def Llvm.verifyLocalInvariants {OpInfo : Type} [IsOpCode OpInfo]
     | .llvmVoidType _ | .llvmFunctionType _ =>
       throw "llvm.mlir.zero: Expected result to have a type with a zero value"
     | _ => pure ()
+  | .intr__memset | .intr__memcpy | .intr__memmove => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyPlainOpCounts ctx opIn 3 0
+    let pointerOperands := if opType = .intr__memset then 1 else 2
+    for i in [0:pointerOperands] do
+      let operandType := (op.getOperand! ctx.raw i).getType! ctx.raw
+      let .llvmPointerType _ := operandType.val
+        | throw s!"Expected operand {i} to have !llvm.ptr type"
+    if opType = .intr__memset then
+      let byteType := (op.getOperand! ctx.raw 1).getType! ctx.raw
+      let .integerType byteType := byteType.val
+        | throw "operand #1 must be 8-bit signless integer"
+      if byteType.bitwidth ≠ 8 then
+        throw s!"operand #1 must be 8-bit signless integer, but got i{byteType.bitwidth}"
+    let lengthType := (op.getOperand! ctx.raw 2).getType! ctx.raw
+    let .integerType _ := lengthType.val
+      | throw "Expected operand 2 to have integer type"
+    /- One entry per operand and per result. MLIR accepts any length here. -/
+    let some props := memIntrinsicProperties opType op ctx
+      | throw "Expected a memory intrinsic"
+    if let some argAttrs := props.arg_attrs then
+      let expected := op.getNumOperands ctx.raw opIn
+      if argAttrs.value.size ≠ expected then
+        throw s!"Expected {expected} 'arg_attrs' entries, but got {argAttrs.value.size}"
+    if let some resAttrs := props.res_attrs then
+      let expected := op.getNumResults ctx.raw opIn
+      if resAttrs.value.size ≠ expected then
+        throw s!"Expected {expected} 'res_attrs' entries, but got {resAttrs.value.size}"
+    pure ()
   | .intr__lifetime__start | .intr__lifetime__end => do
     op.verifyPlainOpCounts ctx opIn 1 0
     let operandType := (op.getOperand! ctx.raw 0).getType! ctx.raw
