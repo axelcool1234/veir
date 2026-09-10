@@ -1,8 +1,5 @@
-module
-
-public import Veir.Analysis.DataFlow.Domains.ConstantDomain
-public import Veir.Analysis.DataFlow.SparseForwardDataFlowAnalysis
-
+import Veir.Analysis.DataFlow.Domains.ConstantDomain
+import Veir.Analysis.DataFlow.SparseForwardDataFlowAnalysis
 import Veir.Interfaces.FoldInterfaces
 
 public section
@@ -16,16 +13,6 @@ instance : SparseFactSpec .sparseConstant AbstractConstant where
 
 def kind : AnalysisKind :=
   .sparseConstantPropagation
-
-private def abstractConstantOfRuntimeValue : RuntimeValue → AbstractConstant
-  | .int bitwidth value => .constant ⟨bitwidth, value⟩
-  | _ => ⊤
-
-private def abstractConstantOfFoldResult
-    (result : FoldResult) (operands : Array AbstractConstant) : AbstractConstant :=
-  match result with
-  | .useOperand index => operands[index]?.getD ⊤
-  | .useConstant value => abstractConstantOfRuntimeValue value
 
 /--
 Sparse constant propagation transfer function.
@@ -54,7 +41,7 @@ def transfer
 
   else if opType.isConstantLike then
     (op.getResults! irCtx.raw).map fun result =>
-      (result.constantValue irCtx.raw).map abstractConstantOfRuntimeValue |>.getD ⊤
+      (result.constantValue irCtx.raw).map AbstractConstant.ofRuntimeValue |>.getD ⊤
 
   else if opInBounds : op.InBounds irCtx.raw then
     let constantOperands := operandLatticeElements.map fun
@@ -62,7 +49,7 @@ def transfer
       | _ => none
     match op.foldsTo irCtx opInBounds constantOperands with
     | some results =>
-      results.map fun result => abstractConstantOfFoldResult result operandLatticeElements
+      results.map fun result => AbstractConstant.ofFoldDecision result operandLatticeElements
     | none =>
         Array.replicate numResults ⊤
 
