@@ -16,9 +16,10 @@ def kind : AnalysisKind :=
 
 /--
 Sparse constant propagation transfer function.
-- region operations conservatively force results to the unknown state,
-- operands at `⊥` delay propagation,
-- otherwise we try to fold and report any discovered constant facts.
+- region operations conservatively force results to `⊤`,
+- any operand at `⊥` leave results as `⊥` and delay propagation,
+- otherwise we try to fold and return the result (if there isn't 
+  a result from the fold, return `⊤`)
 -/
 def transfer
     (op : OperationPtr)
@@ -38,11 +39,13 @@ def transfer
   -- infer a result.
   else if operandLatticeElements.any (· = ⊥) then
     Array.replicate numResults ⊥
-
+  
+  -- Grab constant out of constant like operation
   else if opType.isConstantLike then
     (op.getResults! irCtx.raw).map fun result =>
       (result.constantValue irCtx.raw).map AbstractConstant.ofRuntimeValue |>.getD ⊤
 
+  -- Attempt folding the lattice elements of the operands
   else if opInBounds : op.InBounds irCtx.raw then
     let constantOperands := operandLatticeElements.map fun
       | .constant ⟨bitwidth, value⟩ => some (.int bitwidth value)
