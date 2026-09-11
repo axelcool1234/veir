@@ -41,7 +41,7 @@ private partial def BlockPtr.dominatesWithinRegion
   if dominator = block then
     true
   else
-    let some idom := block.getIDom? dfCtx | return false
+    let some idom := block.getIDom? dfCtx | return true
     idom ≠ block && dominatesWithinRegion dominator idom dfCtx irCtx
 
 
