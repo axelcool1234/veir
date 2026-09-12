@@ -20,3 +20,4 @@ import UnitTest.SideEffectInterfaces
 import UnitTest.RegionKindInterfaces
 import UnitTest.Puddle
 import UnitTest.BoundedBitblasting.BoundedBitblasting
+import UnitTest.DataFlowFramework.SparseConstantPropagation
