@@ -8,6 +8,9 @@ open Veir
 private def constInt (bitwidth : Nat) (value : Int) : AbstractConstant :=
   .constant ⟨bitwidth, Data.LLVM.Int.constant bitwidth value⟩
 
+private def poisonInt (bitwidth : Nat) : AbstractConstant :=
+  .constant ⟨bitwidth, .poison⟩
+
 private def run
     (mlir : String)
     (expected : Array (String × AbstractConstant)) : String :=
@@ -36,6 +39,43 @@ info: "ok"
 -/
 #guard_msgs in
 #eval! testConstantPropagatesAcrossEdge
+
+private def testPoisonConstantPropagatesAcrossEdge : String :=
+  run
+    r#""builtin.module"() ({
+^bb0:
+  %source = "llvm.mlir.poison"() : () -> i32
+  "cf.br"(%source) [^bb1] : (i32) -> ()
+^bb1(%forwarded : i32):
+}) : () -> ()"#
+    #[ ("source", poisonInt 32)
+     , ("forwarded", poisonInt 32)
+     ]
+
+/--
+info: "ok"
+-/
+#guard_msgs in
+#eval! testPoisonConstantPropagatesAcrossEdge
+
+private def testPoisonConstantFoldsWithUnknownOperand : String :=
+  run
+    r#""builtin.module"() ({
+^bb0:
+  %unknown = "test.test"() : () -> i32
+  %poison = "llvm.mlir.poison"() : () -> i32
+  %result = "arith.addi"(%unknown, %poison) : (i32, i32) -> i32
+}) : () -> ()"#
+    #[ ("unknown", ⊤)
+     , ("poison", poisonInt 32)
+     , ("result", poisonInt 32)
+     ]
+
+/--
+info: "ok"
+-/
+#guard_msgs in
+#eval! testPoisonConstantFoldsWithUnknownOperand
 
 private def testConstantsPropagateByArgumentPosition : String :=
   run
