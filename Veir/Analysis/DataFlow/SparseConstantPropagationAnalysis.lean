@@ -16,7 +16,7 @@ def kind : AnalysisKind :=
 
 /--
 Sparse constant propagation transfer function.
-- region operations conservatively force results to `⊤`,
+- operations with regions conservatively force results to `⊤`,
 - any operand at `⊥` leave results as `⊥` and delay propagation,
 - otherwise we try to fold and return the result (if there isn't 
   a result from the fold, return `⊤`)
@@ -28,10 +28,10 @@ def transfer
   let numResults := op.getNumResults! irCtx.raw
   let opType := op.getOpType! irCtx.raw
 
-  -- Don't try to simulate the results of a region operation as we can't
-  -- guarantee that folding will be out-of-place. We don't allow in-place
-  -- folds as the desire here is for simulated execution, and not general
-  -- folding.
+  -- Don't try to simulate the results of an operation with regions as we
+  -- can't guarantee that folding will be out-of-place. We don't allow
+  -- in-place folds as the desire here is for simulated execution, and not
+  -- general folding.
   if op.getNumRegions! irCtx.raw ≠ 0 then
     Array.replicate numResults ⊤
 
