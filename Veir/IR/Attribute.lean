@@ -72,7 +72,7 @@ Convert Veir's `FloatType` into Lean's floating type `Float.Model.Format`
 that represents IEEE-style floating point formats.
 -/
 abbrev toFormat (type : FloatType)
-    (hm : 0 < type.mantissa := by grind)
+    (hm : 0 < type.format.mantissaWithoutLeadingBit := by grind)
     (he : 2 ≤ type.exponent := by grind) : Float.Model.Format :=
   type.format.toLeanFormat hm he
 
@@ -80,6 +80,8 @@ def f16 : FloatType := { format := .f16 }
 def f32 : FloatType := { format := .f32 }
 def f64 : FloatType := { format := .f64 }
 def bf16 : FloatType := { format := .bf16 }
+def f80 : FloatType := { format := .f80 }
+def f128 : FloatType := { format := .f128 }
 def f8E5M2 : FloatType := { format := .f8E5M2 }
 def f8E4M3FN : FloatType := { format := .f8E4M3FN }
 def f8E4M3FNUZ : FloatType := { format := .f8E4M3FNUZ }
