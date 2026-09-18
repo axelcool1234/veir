@@ -19,7 +19,7 @@ The solver state containing all dataflow facts and the worklist of program point
 to call transfer functions on.
 -/
 structure DataFlowContext where
-  lattice : HashMap LatticeAnchor (DHashMap FactKind Fact)
+  lattice : DHashMap FactKey (Fact ·.kind)
   registeredAnalyses : HashSet AnalysisKind
   workList : WorkList
 
@@ -98,9 +98,8 @@ def hasAnalysis (ctx : DataFlowContext) (analysisKind : AnalysisKind) : Bool :=
 Read the fact of kind `kind` stored at `anchor`, if any.
 -/
 def getFact? (kind : FactKind) [FactSpec kind]
-    (ctx : DataFlowContext) (anchor : LatticeAnchor) : Option (Fact kind) := do
-  let facts ← ctx.lattice.get? anchor
-  DHashMap.get? facts kind
+    (ctx : DataFlowContext) (anchor : LatticeAnchor) : Option (Fact kind) :=
+  ctx.lattice.get? { anchor, kind }
 
 /--
 Read the fact of kind `kind` at `anchor`, creating the default fact if it is absent.
@@ -117,8 +116,7 @@ Overwrite the stored fact of kind `kind` for `anchor`.
 -/
 private def setFact (kind : FactKind) [FactSpec kind]
     (ctx : DataFlowContext) (anchor : LatticeAnchor) (fact : Fact kind) : DataFlowContext :=
-  let facts := (ctx.lattice.getD anchor ∅).insert kind fact
-  { ctx with lattice := ctx.lattice.insert anchor facts }
+  { ctx with lattice := ctx.lattice.insert { anchor, kind } fact }
 
 /--
 Apply an update with `f` to the fact of kind `kind` stored at `anchor`. 

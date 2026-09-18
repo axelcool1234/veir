@@ -32,7 +32,7 @@ A directed control flow edge between two blocks.
 structure CFGEdge where
   source : BlockPtr
   target : BlockPtr
-deriving BEq, Hashable
+deriving BEq, Hashable, DecidableEq
 
 /--
 The control flow graph positions and SSA values where dataflow facts are attached.
@@ -42,7 +42,7 @@ inductive LatticeAnchor
   | BlockPtr (block : BlockPtr)
   | ValuePtr (value : ValuePtr)
   | CFGEdge (edge : CFGEdge)
-deriving BEq, Hashable
+deriving BEq, Hashable, DecidableEq
 
 instance : Coe InsertPoint LatticeAnchor where
   coe := .InsertPoint
@@ -90,6 +90,14 @@ inductive FactKind where
   | integerRange
   | modArithRange
 deriving BEq, ReflBEq, LawfulBEq, Hashable, Repr, DecidableEq
+
+/--
+The identity of a dataflow fact: its location in the IR and its fact kind.
+-/
+structure FactKey where
+  anchor : LatticeAnchor
+  kind : FactKind
+deriving Hashable, DecidableEq
 
 abbrev WorkItem := InsertPoint × AnalysisKind
 
