@@ -141,14 +141,16 @@ def recoverNames
 
 /--
 Parse an MLIR snippet string, run the requested dataflow analyses to a fixpoint, and
-render any test mismatches produced by `check`.
+render any test mismatches produced by `check`. Set `verifyAfterParse` to false for
+tests that intentionally exercise invalid IR.
 -/
 def runWithAnalyses
     (mlir : String)
     (analyses : Array DataFlowAnalysis)
-    (check : OperationPtr -> DataFlowContext -> WfIRContext OpCode -> MismatchReport) :
+    (check : OperationPtr -> DataFlowContext -> WfIRContext OpCode -> MismatchReport)
+    (verifyAfterParse : Bool := true) :
     String := Id.run do
-  match parseSourceString mlir.toUTF8 with
+  match parseSourceString mlir.toUTF8 (verifyAfterParse := verifyAfterParse) with
   | .error err =>
       return s!"parse failed: {err}"
   | .ok (ctx, top, _) =>

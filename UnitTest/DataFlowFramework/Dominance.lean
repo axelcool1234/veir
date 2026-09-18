@@ -221,13 +221,15 @@ should dominate it. An empty set means the block should remain unreachable.
 -/
 def run
     (mlir : String)
-    (expected : Array ExpectedBlockDominators) : String :=
+    (expected : Array ExpectedBlockDominators)
+    (verifyAfterParse : Bool := true) : String :=
   runWithAnalyses mlir #[Veir.DominanceAnalysis] (fun top dfCtx ctx => Id.run do
     match recoverNames top ctx mlir with
     | Except.error err =>
         return #[err]
     | Except.ok recovered =>
         compareNamedDominators recovered expected dfCtx ctx)
+      (verifyAfterParse := verifyAfterParse)
 
 /--
 Run the operation dominance test harness on one MLIR snippet.
@@ -529,6 +531,37 @@ def testDomDiamondLoop: String :=
      ]
 
 /-
+  Test: changing an ancestor in an immediate dominator chain revisits every
+  computation that read that ancestor.
+-/
+def testDomAncestorUpdate : String :=
+  run r#""func.func"() <{sym_name = "f", function_type = (i1, i1, i1) -> ()}> ({
+^entry(%a : i1, %b : i1, %c : i1):
+  "cf.cond_br"(%a, %a) [^left, ^def] <{operandSegmentSizes = array<i32: 1, 0, 1>}> : (i1, i1) -> ()
+^left:
+  "cf.br"() [^join] : () -> ()
+^def(%v : i1):
+  "cf.br"() [^use] : () -> ()
+^mid(%unused : i1):
+  "cf.br"() [^tail] : () -> ()
+^use:
+  "cf.br"(%v) [^mid] : (i1) -> ()
+^join:
+  "cf.cond_br"(%b, %a) [^mid, ^left] <{operandSegmentSizes = array<i32: 1, 1, 0>}> : (i1, i1) -> ()
+^tail:
+  "cf.cond_br"(%c) [^join, ^use] <{operandSegmentSizes = array<i32: 1, 0, 0>}> : (i1) -> ()
+}) : () -> ()"#
+    #[ { name := "entry", doms := { "entry" },                immediateDom := "entry" }
+     , { name := "left",  doms := { "entry", "left" },        immediateDom := "entry" }
+     , { name := "def",   doms := { "entry", "def" },         immediateDom := "entry" }
+     , { name := "mid",   doms := { "entry", "mid" },         immediateDom := "entry" }
+     , { name := "use",   doms := { "entry", "use" },         immediateDom := "entry" }
+     , { name := "join",  doms := { "entry", "join" },        immediateDom := "entry" }
+     , { name := "tail",  doms := { "entry", "mid", "tail" }, immediateDom := "mid" }
+     ]
+    (verifyAfterParse := false)
+
+/-
   Test: operation dominance across nested regions
 -/
 def testOpDomNestedRegions : String :=
@@ -735,6 +768,12 @@ info: "ok"
 -/
 #guard_msgs in
 #eval! testDomDiamondLoop
+
+/--
+info: "ok"
+-/
+#guard_msgs in
+#eval! testDomAncestorUpdate
 
 /--
 info: "ok"
