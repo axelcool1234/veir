@@ -186,13 +186,7 @@ private def visitBlock
         -- is revisited when that operand lattice changes.
         let dependentPoint := InsertPoint.atStart! block irCtx.raw
         let workItem : WorkItem := (dependentPoint, analysisKind)
-        dfCtx := dfCtx.modifyFact kind (.ValuePtr operand) (fun state =>
-          if state.dependents.any (fun dependent =>
-              dependent.1 = dependentPoint && dependent.2 = analysisKind) then
-            -- Do not add dependent again if it's already added.
-            state
-          else
-            state.addDependent workItem)
+        dfCtx := dfCtx.modifyFact kind (.ValuePtr operand) (·.addDependentOnce workItem)
 
         -- Call transfer function
         let incoming :=
