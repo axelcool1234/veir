@@ -6,7 +6,7 @@ public import Veir.Analysis.DataFlow.Domains.LivenessDomain
 public import Veir.Rewriter.InsertPoint
 public import Veir.Analysis.DataFlow.Domains.ConstantDomain
 
-open Std (HashMap Queue)
+open Std (HashMap HashSet Queue)
 
 public section
 
@@ -92,7 +92,35 @@ inductive FactKind where
 deriving BEq, ReflBEq, LawfulBEq, Hashable, Repr, DecidableEq
 
 abbrev WorkItem := InsertPoint × AnalysisKind
-abbrev WorkList := Queue WorkItem
+
+/--
+A FIFO worklist that keeps at most one pending copy of each work item.
+-/
+structure WorkList where
+  queue : Queue WorkItem
+  pending : HashSet WorkItem
+
+namespace WorkList
+
+/-- An empty worklist. -/
+def empty : WorkList :=
+  { queue := .empty
+    pending := ∅ }
+
+/-- Enqueue `workItem` unless it is already pending. -/
+def enqueue (workList : WorkList) (workItem : WorkItem) : WorkList :=
+  if workList.pending.contains workItem then
+    workList
+  else
+    { queue := workList.queue.enqueue workItem
+      pending := workList.pending.insert workItem }
+
+/-- Remove and return the oldest pending work item. -/
+def dequeue? (workList : WorkList) : Option (WorkItem × WorkList) := do
+  let (workItem, queue) ← workList.queue.dequeue?
+  return (workItem, { queue, pending := workList.pending.erase workItem })
+
+end WorkList
 
 /--
 The immediate dominator fact attached to a block entry.
