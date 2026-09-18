@@ -160,6 +160,10 @@ Add one dependent work item to the fact.
 def addDependent (fact : Fact kind) (workItem : WorkItem) : Fact kind :=
   fact.setDependents (fact.dependents.push workItem)
 
+/-- Add a work item to the fact's dependents unless it is already present. -/
+def addDependentOnce (fact : Fact kind) (workItem : WorkItem) : Fact kind :=
+  if fact.dependents.any (· = workItem) then fact else fact.addDependent workItem
+
 /--
 Subscribe one analysis to changes of this fact.
 -/
