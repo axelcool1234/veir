@@ -87,6 +87,18 @@ theorem ControlFlowAction.optionIsRefinedBy_refl (cf : Option ControlFlowAction)
   | none => trivial
   | some a => cases a <;> simp [ControlFlowAction.optionIsRefinedBy, ControlFlowAction.isRefinedBy]
 
+@[simp, grind .]
+theorem OperationResult.isRefinedBy_refl
+    (r : Array RuntimeValue × MemoryState × Option ControlFlowAction) :
+    OperationResult.isRefinedBy r r := by
+  simp [OperationResult.isRefinedBy, ControlFlowAction.optionIsRefinedBy_refl]
+
+@[grind .]
+theorem Interp.isRefinedBy_refl_operationResult
+    (x : Interp (Array RuntimeValue × MemoryState × Option ControlFlowAction)) :
+    Interp.isRefinedBy OperationResult.isRefinedBy x x := by
+  cases x <;> simp [Interp.isRefinedBy]
+
 /-! ## Transitivity -/
 
 theorem RuntimeValue.isRefinedBy_trans {v₁ v₂ v₃ : RuntimeValue}
@@ -178,6 +190,14 @@ theorem RuntimeValue.reg_of_isRefinedBy {v : Data.RISCV.Reg} {tv : RuntimeValue}
     (h : RuntimeValue.reg v ⊒ tv) :
     tv = RuntimeValue.reg v := by
   cases tv <;> grind [RuntimeValue.isRefinedBy]
+
+/--
+A register runtime value can only be refined by itself, so operand arrays that consist purely of
+registers are refined only by themselves.
+-/
+theorem RuntimeValue.eq_of_arrayIsRefinedBy_of_regs {a b : Array RuntimeValue}
+    (h : a ⊒ b) (hregs : ∀ v ∈ a, ∃ r, v = .reg r) : b = a := by
+  grind [arrayIsRefinedBy, reg_of_isRefinedBy, Array.getElem_mem]
 
 /-! ## Interp refinements -/
 
