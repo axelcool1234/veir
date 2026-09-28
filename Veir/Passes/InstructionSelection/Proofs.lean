@@ -739,52 +739,15 @@ theorem sext_refinement_1_32 {x : LLVM.Int 1} :
   veir_bv_decide
 
 /--
-  Prove the correctness of the `trunc` lowering pattern `i64` -> `i32`
+  Prove the correctness of the `trunc` lowering pattern at every pair of widths `w₂ < w₁ ≤ 64`:
+  the operand is zero-extended into a register and the low `w₂` bits are read back. The
+  `nsw`/`nuw` flags only add poison cases, which any register value refines.
 -/
-theorem trunc_refinement_64_32 {x : LLVM.Int 64} :
-    (Data.LLVM.Int.trunc x 32 nsw nuw h) ⊒
-      (RISCV.Reg.toInt (LLVM.Int.toReg x) 32) := by
-  veir_bv_decide
-
-/--
-  Prove the correctness of the `trunc` lowering pattern `i64` -> `i16`
--/
-theorem trunc_refinement_64_16 {x : LLVM.Int 64} :
-    (Data.LLVM.Int.trunc x 16 nsw nuw h) ⊒
-      (RISCV.Reg.toInt (LLVM.Int.toReg x) 16) := by
-  veir_bv_decide
-
-/--
-  Prove the correctness of the `trunc` lowering pattern `i64` -> `i8`
--/
-theorem trunc_refinement_64_8 {x : LLVM.Int 64} :
-    (Data.LLVM.Int.trunc x 8 nsw nuw h) ⊒
-      (RISCV.Reg.toInt (LLVM.Int.toReg x) 8) := by
-  veir_bv_decide
-
-/--
-  Prove the correctness of the `trunc` lowering pattern `i32` -> `i16`
--/
-theorem trunc_refinement_32_16 {x : LLVM.Int 32} :
-    (Data.LLVM.Int.trunc x 16 nsw nuw h) ⊒
-      (RISCV.Reg.toInt (LLVM.Int.toReg x) 16) := by
-  veir_bv_decide
-
-/--
-  Prove the correctness of the `trunc` lowering pattern `i32` -> `i8`
--/
-theorem trunc_refinement_32_8 {x : LLVM.Int 32} :
-    (Data.LLVM.Int.trunc x 8 nsw nuw h) ⊒
-      (RISCV.Reg.toInt (LLVM.Int.toReg x) 8) := by
-  veir_bv_decide
-
-/--
-  Prove the correctness of the `trunc` lowering pattern `i16` -> `i8`
--/
-theorem trunc_refinement_16_8 {x : LLVM.Int 16} :
-    (Data.LLVM.Int.trunc x 8 nsw nuw h) ⊒
-      (RISCV.Reg.toInt (LLVM.Int.toReg x) 8) := by
-  veir_bv_decide
+theorem trunc_refinement_le64 {w₁ w₂ : Nat} (hw : w₁ ≤ 64) {x : LLVM.Int w₁} {nsw nuw : Bool}
+    {h : w₁ > w₂} :
+    (Data.LLVM.Int.trunc x w₂ nsw nuw h) ⊒ (RISCV.Reg.toInt (LLVM.Int.toReg x) w₂) := by
+  veir_bv_normalize
+  pbv_decide 64
 
 /--
   Prove the correctness of the `smax` lowering pattern (`llvm.intr.smax` -> `max`).
