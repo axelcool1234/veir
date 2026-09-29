@@ -21,6 +21,28 @@ def OperationPtr.isBranchLike {OpInfo : Type} [HasOpInfo OpInfo]
 
 namespace BranchOpInterface
 
+/-- Return the true or false successor of a conditional branch. -/
+def getConditionalSuccessor?
+    (successors : Array BlockPtr) (condition : Bool) : Option BlockPtr :=
+  if condition then successors[0]? else successors[1]?
+
+/--
+Return the operands in the successor segment of an operation whose fixed operands
+precede one operand segment per successor.
+-/
+def getSegmentedSuccessorOperands?
+    (fixedOperandCount : Nat) (segmentSizes : Array Int) (operands : Array ValuePtr)
+    (successorIndex : Nat) : Option SuccessorOperands := do
+  let segmentIndex := fixedOperandCount + successorIndex
+  let forwardedCountRaw ← segmentSizes[segmentIndex]?
+  let forwardedCount := forwardedCountRaw.toNat
+  let forwardedStart := fixedOperandCount +
+    (segmentSizes.extract fixedOperandCount segmentIndex).foldl
+      (init := 0) fun acc value => acc + value.toNat
+  some {
+    forwardedOperands := operands.extract forwardedStart (forwardedStart + forwardedCount)
+  }
+
 /--
   Return the operands passed to `successorIndex` of a branch operation.
 -/

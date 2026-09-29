@@ -2,6 +2,7 @@ module
 
 public import Veir.IR.Simp
 public import Veir.IR.OpInfo
+public import Veir.Interfaces.ControlFlowInterfaces
 public import Veir.Verifier.Basic
 public import Veir.Dialects.Cf.Properties
 public import Veir.Interpreter.RuntimeValue.Basic

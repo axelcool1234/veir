@@ -2,7 +2,6 @@ module
 
 public import Veir.IR.OpCode
 public import Veir.IR.WellFormed
-public import Veir.IR.ControlFlow
 public import Veir.FoldDecision
 
 namespace Veir
@@ -52,6 +51,30 @@ structure FunctionOpInterface (Properties : Type) where
   getFunctionType : Properties → FunctionType
   /-- Return the properties with the function type replaced. -/
   setFunctionType : Properties → FunctionType → Properties
+
+/-- The SSA values forwarded from a branch operation to one of its successors. -/
+structure SuccessorOperands where
+  /-- The SSA values forwarded to the successor. -/
+  forwardedOperands : Array ValuePtr
+deriving Inhabited, Repr, DecidableEq
+
+instance : GetElem SuccessorOperands Nat ValuePtr
+    (fun operands blockArgumentIndex => blockArgumentIndex < operands.forwardedOperands.size) where
+  getElem := fun operands blockArgumentIndex h => operands.forwardedOperands[blockArgumentIndex]'h
+
+instance : GetElem? SuccessorOperands Nat ValuePtr
+    (fun operands blockArgumentIndex => blockArgumentIndex < operands.forwardedOperands.size) where
+  getElem? := fun operands blockArgumentIndex => operands.forwardedOperands[blockArgumentIndex]?
+
+/-- Information exposed by operations that branch to successor blocks. -/
+structure BranchOpInterface (Properties : Type) where
+  /-- Return the operands passed to the indexed successor. -/
+  getSuccessorOperandsImpl? :
+    Properties → Array ValuePtr → Nat → Option SuccessorOperands
+  /-- Return the successor selected by the known constant operands. -/
+  getSuccessorForOperandsImpl? :
+    Properties → Array (Option RuntimeValue) → Array BlockPtr → Option BlockPtr :=
+      fun _ _ _ => none
 
 class HasOpInfo (opCode: Type)
     extends IsOpCode opCode where
