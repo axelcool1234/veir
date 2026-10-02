@@ -158,17 +158,32 @@ def runWithAnalyses
         | return "analysis did not converge"
       return renderReport (check top dfCtx ctx)
 
-/-- Dead code helpers. -/
+/-!
+## Dead-code liveness test helpers
+-/
+
+/--
+Return whether `block` has a live block start fact.
+A missing liveness fact is treated as dead.
+-/
 def isBlockLive (dfCtx : DataFlowContext) (block : BlockPtr) (irCtx : WfIRContext OpCode) : Bool :=
   match dfCtx.getFact? .liveness (.InsertPoint (InsertPoint.atStart! block irCtx.raw)) with
   | some fact => fact.live
   | none => false
 
+/--
+Return whether the control flow edge from `src` to `dst` has a live edge fact.
+A missing liveness fact is treated as dead.
+-/
 def isEdgeLive (dfCtx : DataFlowContext) (src dst : BlockPtr) : Bool :=
   match dfCtx.getFact? .liveness (.CFGEdge { source := src, target := dst }) with
   | some fact => fact.live
   | none => false
 
+/--
+Compare the observed liveness of named blocks with `expected`, reporting missing
+block labels and mismatches. Blocks without a stored liveness fact are observed as dead.
+-/
 def checkNamedBlockLiveness
     (dfCtx : DataFlowContext)
     (irCtx : WfIRContext OpCode)
@@ -185,6 +200,10 @@ def checkNamedBlockLiveness
       report := report.push s!"block {name}: missing block label"
   report
 
+/--
+Compare the observed liveness of named control flow edges with `expected`, reporting
+missing block labels and mismatches. Edges without a stored liveness fact are observed as dead.
+-/
 def checkNamedEdgeLiveness
     (dfCtx : DataFlowContext)
     (blockMap : HashMap String BlockPtr)
