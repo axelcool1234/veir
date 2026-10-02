@@ -5,7 +5,6 @@ public import Veir.Analysis.DataFlow.SparseFact
 public import Veir.Analysis.DataFlow.Domains.ConstantDomain
 public import Veir.Interfaces.ConstantLikeInterfaces
 public import Veir.Interfaces.ControlFlowInterfaces
-public import Std.Data.HashSet
 
 public section
 
@@ -56,7 +55,7 @@ end LivenessFact
 
 namespace DeadCodeAnalysis
 
-variable [FactSpec .liveness] [SparseFactSpec .sparseConstant AbstractConstant]
+variable [FactSpec .liveness]
 
 def kind : AnalysisKind :=
   .deadCode
@@ -199,7 +198,7 @@ private def visitOp
       let parentBlock := (op.get! irCtx.raw).parent.get hParent
 
       -- Check if we can reason about the control-flow.
-      if (BranchOpInterface.getSuccessorOperands? op 0 irCtx.raw).isSome then
+      if op.isBranchLike irCtx.raw then
         dfCtx := visitBranchOperation op dfCtx irCtx
       else
         -- Conservatively mark all successors as live.
@@ -274,7 +273,7 @@ def init
 
 end DeadCodeAnalysis
 
-def DeadCodeAnalysis [FactSpec .liveness] [SparseFactSpec .sparseConstant AbstractConstant] : DataFlowAnalysis :=
+def DeadCodeAnalysis [FactSpec .liveness] : DataFlowAnalysis :=
   { kind := DeadCodeAnalysis.kind
     init := DeadCodeAnalysis.init
     visit := DeadCodeAnalysis.visit }
