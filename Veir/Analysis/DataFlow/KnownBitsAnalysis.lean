@@ -13,9 +13,7 @@ namespace Veir
 # Known bits analysis
 
 This sparse forward analysis tracks fixed width integer bits that are provably zero
-or one. Its transfer functions follow LLVM's `KnownBits` algorithms for arithmetic,
-bitwise operations, shifts, casts, comparisons, division, remainder, and structural
-bit operations across the Arith, Comb, and LLVM dialects.
+or one.
 -/
 
 namespace KnownBitsAnalysis
