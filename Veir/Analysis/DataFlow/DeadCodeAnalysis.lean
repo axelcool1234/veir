@@ -1,10 +1,9 @@
 module
 
 public import Veir.Analysis.DataFlowFramework
-public import Veir.Analysis.DataFlow.SparseFact
-public import Veir.Analysis.DataFlow.Domains.ConstantDomain
-public import Veir.Interfaces.ConstantLikeInterfaces
-public import Veir.Interfaces.ControlFlowInterfaces
+import Veir.Analysis.DataFlow.SparseFact
+import Veir.Interfaces.ConstantLikeInterfaces
+import Veir.Interfaces.ControlFlowInterfaces
 
 public section
 
