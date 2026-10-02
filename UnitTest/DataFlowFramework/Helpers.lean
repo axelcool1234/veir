@@ -150,8 +150,7 @@ def runWithAnalyses
     (analyses : Array DataFlowAnalysis)
     (check : OperationPtr -> DataFlowContext -> WfIRContext OpCode -> MismatchReport) :
     String := Id.run do
-  -- TODO: Use valid IR for DataFlow unit tests.
-  match parseSourceString mlir.toUTF8 (verifyAfterParse := false) with
+  match parseSourceString mlir.toUTF8 with
   | .error err =>
       return s!"parse failed: {err}"
   | .ok (ctx, top, _) =>
