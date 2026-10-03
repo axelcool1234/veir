@@ -1,4 +1,6 @@
 // RUN: veir-interpret %s | filecheck %s
+// RUN: LLUBI
+
 
 // Regression check: a poison dividend with a concrete safe (nonzero) divisor
 // propagates as poison — NOT immediate UB.

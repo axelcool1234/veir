@@ -1,5 +1,9 @@
 // RUN: veir-interpret %s | filecheck %s
 
+// LLUBI: cannot cross-check this test: it returns a pointer, which the
+// comparison does not know how to read.
+
+
 // A poison pointer written to memory and read back gives poison again.
 
 "builtin.module"() ({

@@ -1,4 +1,6 @@
 // RUN: veir-interpret %s | filecheck %s
+// RUN: LLUBI
+
 
 // `srem intMin, -1` is immediate UB (signed overflow in the implicit division).
 "builtin.module"() ({

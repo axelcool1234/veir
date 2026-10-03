@@ -1,4 +1,6 @@
 // RUN: veir-interpret %s | filecheck %s
+// RUN: LLUBI
+
 
 // In i1, -1 is also intMin, so `srem -1, -1` is immediate UB.
 "builtin.module"() ({
