@@ -1,4 +1,4 @@
-// RUN: veir-opt %s -p=print-mod-arith-ranges | filecheck %s
+// RUN: veir-opt %s -p='print-dataflow{mod-arith-ranges}' | filecheck %s
 
 "builtin.module"() ({
   "func.func"() <{function_type = (!mod_arith.int<12289 : i32>, !mod_arith.int<12289 : i32>) -> !mod_arith.int<12289 : i32>, sym_name = "default_reduction"}> ({

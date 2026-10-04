@@ -5,7 +5,7 @@ import Veir.Panic
 import Veir.Input
 
 import Veir.Passes.PrintIR
-import Veir.Passes.PrintModArithRanges
+import Veir.Passes.PrintDataFlow
 import Veir.Passes.InstCombine
 import Veir.Passes.ApplyPatterns
 import Veir.Passes.CSE
@@ -24,7 +24,6 @@ import Veir.Passes.Legalization
 import Veir.Passes.Legalization.RISCV64LegalizerInfo
 import Veir.Passes.CirToStd
 import Veir.Passes.LLVMToGMIR
-import Veir.Passes.PrintSCCP
 
 open Veir.Parser
 open Veir.Parser.ParserError
@@ -36,7 +35,7 @@ open Veir
 -/
 def availablePasses : Std.HashMap String (Pass OpCode) :=
   ([ PrintIRPass,
-     PrintModArithRangesPass,
+     PrintDataFlowPass,
      InstCombinePass,
      ApplyPatternsPass,
      CSEPass,
@@ -55,8 +54,7 @@ def availablePasses : Std.HashMap String (Pass OpCode) :=
      LegalizePass,
      LegalizeRISCV64Pass,
      CirToStdPass,
-     LLVMToGMIRPass,
-     PrintSCCPPass ] : List (Pass OpCode)).foldl
+     LLVMToGMIRPass ] : List (Pass OpCode)).foldl
     (fun m pass => m.insert pass.name pass)
     (Std.HashMap.emptyWithCapacity 16)
 

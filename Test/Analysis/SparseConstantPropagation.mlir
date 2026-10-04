@@ -1,4 +1,4 @@
-// RUN: veir-opt %s -p=print-sccp | filecheck %s
+// RUN: veir-opt %s -p='print-dataflow{sccp}' | filecheck %s
 
 "builtin.module"() ({
   // CHECK:      // dataflow.liveness block entry = live

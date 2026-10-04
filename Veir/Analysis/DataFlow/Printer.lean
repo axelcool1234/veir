@@ -10,20 +10,11 @@ namespace Veir
 # Dataflow analysis result printing
 
 Dataflow facts have heterogeneous payloads, so a single printer cannot know how
-to render every `FactKind`. Consequently, `DataFlowFactPrinter` uses type erasure. 
-Each analysis supplies a small callback for the anchors and fact payloads.
+to render every `FactKind`. Each analysis therefore supplies a type erased
+`DataFlowPrinter` callback for the anchors and fact payloads it understands.
 -/
 
-/--
-Type erased rendering for one family of dataflow facts.
-
-Returning `none` means that the printer does not apply to this kind of anchor.
--/
-structure DataFlowFactPrinter where
-  name : String
-  format? : LatticeAnchor → DataFlowContext → WfIRContext OpCode → Option String
-
-namespace DataFlowFactPrinter
+namespace DataFlowPrinter
 
 /-- Build a value printer for a sparse abstract domain. -/
 def sparse
@@ -33,7 +24,7 @@ def sparse
     [Bot Domain]
     [ToString Domain]
     (shouldPrint : ValuePtr → WfIRContext OpCode → Bool := fun _ _ => true) :
-    DataFlowFactPrinter :=
+    DataFlowPrinter :=
   { name
     format? := fun anchor dfCtx irCtx =>
       match anchor with
@@ -44,15 +35,17 @@ def sparse
           none
       | _ => none }
 
-end DataFlowFactPrinter
+end DataFlowPrinter
 
 private def printDataFlowAnchor
     (label : String)
     (anchor : LatticeAnchor)
-    (printers : Array DataFlowFactPrinter)
+    (analyses : Array DataFlowAnalysis)
     (dfCtx : DataFlowContext)
     (irCtx : WfIRContext OpCode) : IO Unit := do
-  for printer in printers do
+  for analysis in analyses do
+    let some printer := analysis.printer?
+      | continue
     if let some value := printer.format? anchor dfCtx irCtx then
       IO.println s!"// dataflow.{printer.name} {label} = {value}"
 
@@ -60,12 +53,12 @@ private def printDataFlowAnchor
 Print selected dataflow facts in IR order.
 
 The traversal exposes block facts, block entry program points, SSA values, and
-CFG edges. A `DataFlowFactPrinter` chooses which anchors are meaningful for its
-fact kind.
+CFG edges. Each selected analysis's `DataFlowPrinter` chooses which anchors are
+meaningful for its fact kind.
 -/
 partial def printDataFlowFacts
     (op : OperationPtr)
-    (printers : Array DataFlowFactPrinter)
+    (analyses : Array DataFlowAnalysis)
     (dfCtx : DataFlowContext)
     (irCtx : WfIRContext OpCode) : IO Unit := do
   let opName := String.fromUTF8! (IsOpCode.name (op.getOpType! irCtx.raw))
@@ -74,7 +67,7 @@ partial def printDataFlowFacts
     printDataFlowAnchor
       s!"{opName} result {i}"
       (.ValuePtr (op.getResult i))
-      printers dfCtx irCtx
+      analyses dfCtx irCtx
 
   if let some source := (op.get! irCtx.raw).parent then
     for i in [0:op.getNumSuccessors! irCtx.raw] do
@@ -82,7 +75,7 @@ partial def printDataFlowFacts
       printDataFlowAnchor
         s!"{opName} successor {i}"
         (.CFGEdge { source, target })
-        printers dfCtx irCtx
+        analyses dfCtx irCtx
 
   for regionPtr in (op.get! irCtx.raw).regions do
     let region := regionPtr.get! irCtx.raw
@@ -91,21 +84,21 @@ partial def printDataFlowFacts
       printDataFlowAnchor
         "block"
         (.BlockPtr block)
-        printers dfCtx irCtx
+        analyses dfCtx irCtx
       printDataFlowAnchor
         "block entry"
         (.InsertPoint (InsertPoint.atStart! block irCtx.raw))
-        printers dfCtx irCtx
+        analyses dfCtx irCtx
 
       for i in [0:block.getNumArguments! irCtx.raw] do
         printDataFlowAnchor
           s!"block argument {i}"
           (.ValuePtr (block.getArgument i))
-          printers dfCtx irCtx
+          analyses dfCtx irCtx
 
       let mut maybeNestedOp := (block.get! irCtx.raw).firstOp
       while let some nestedOp := maybeNestedOp do
-        printDataFlowFacts nestedOp printers dfCtx irCtx
+        printDataFlowFacts nestedOp analyses dfCtx irCtx
         maybeNestedOp := (nestedOp.get! irCtx.raw).next
 
       maybeBlock := (block.get! irCtx.raw).next
