@@ -159,6 +159,26 @@ theorem of_successor
     region.Path ctx source successor [source, successor] := by
   exact Path.Cons sourceParent successorEdge (Path.Single successorParent)
 
+/-- A path is either a singleton or consists of a shorter path followed by its final edge. -/
+theorem eq_single_or_exists_unsnoc
+    (path : region.Path ctx source target blocks) :
+    (source = target ∧ blocks = [source]) ∨
+      ∃ predecessor prefixBlocks,
+        region.Path ctx source predecessor prefixBlocks ∧
+          target ∈ predecessor.getSuccessors! ctx.raw ∧
+          blocks = prefixBlocks ++ [target] := by
+  induction path with
+  | Single parent => exact Or.inl ⟨rfl, rfl⟩
+  | @Cons source next target blocks parent successor tail ih =>
+      rcases ih with ⟨nextEq, blocksEq⟩ |
+        ⟨predecessor, prefixBlocks, prefixPath, edge, blocksEq⟩
+      · subst target
+        subst blocks
+        exact Or.inr ⟨source, [source], .Single parent, successor, rfl⟩
+      · refine Or.inr ⟨predecessor, source :: prefixBlocks, ?_, edge, ?_⟩
+        · exact .Cons parent successor prefixPath
+        · simp only [blocksEq, List.cons_append]
+
 end RegionPtr.Path
 
 namespace BlockPtr.LocallyReachable
@@ -255,5 +275,61 @@ theorem OperationPtr.HierarchicallyReachable.parent_block
     (parent : op.getParent! ctx.raw = some block) :
     block.HierarchicallyReachable ctx :=
   reachable block parent
+
+namespace BlockPtr.ProperlyDominatesInSSACFGRegion
+
+variable {region : RegionPtr}
+variable {dominator dominated predecessor : BlockPtr}
+
+/-- A proper dominator is distinct from the block it dominates. -/
+theorem ne
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx) :
+    dominator ≠ dominated := by
+  rcases dominance with ⟨_, _, _, hne, _⟩
+  exact hne
+
+/-- A proper dominator occurs on every path from the region entry to the dominated block. -/
+theorem mem_of_entry_path
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx)
+    (entryIsFirst : region.getFirstBlock! ctx.raw = some entry)
+    (path : region.Path ctx entry dominated blocks) :
+    dominator ∈ blocks := by
+  rcases dominance with ⟨_, _, _, _, dominatesPaths⟩
+  exact dominatesPaths entry blocks entryIsFirst path
+
+/-- The entry block of an SSACFG region has no proper dominator. -/
+theorem false_of_dominated_is_entry
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx)
+    (entryIsFirst : region.getFirstBlock! ctx.raw = some dominated) : False := by
+  rcases dominance with
+    ⟨_, dominatedParent, _, dominatorNeDominated, dominatesPaths⟩
+  have dominatorMem := dominatesPaths dominated [dominated] entryIsFirst (.Single dominatedParent)
+  simp only [List.mem_singleton] at dominatorMem
+  exact dominatorNeDominated dominatorMem
+
+/-- A proper dominator of a block dominates each predecessor of that block. -/
+theorem dominates_predecessor
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx)
+    (predecessorParent : predecessor.getParent! ctx.raw = some region)
+    (successor : dominated ∈ predecessor.getSuccessors! ctx.raw) :
+    dominator.DominatesInSSACFGRegion predecessor region ctx := by
+  rcases dominance with
+    ⟨dominatorParent, dominatedParent, ssa, dominatorNeDominated, dominatesPaths⟩
+  by_cases dominatorEqPredecessor : dominator = predecessor
+  · exact Or.inl dominatorEqPredecessor
+  · right
+    refine ⟨dominatorParent, predecessorParent, ssa, dominatorEqPredecessor, ?_⟩
+    intro entry blocks entryIsFirst path
+    have edgePath : region.Path ctx predecessor dominated [predecessor, dominated] :=
+      .Cons predecessorParent successor (.Single dominatedParent)
+    have extendedPath : region.Path ctx entry dominated (blocks ++ [dominated]) := by
+      simpa using RegionPtr.Path.append path edgePath
+    have dominatorMem := dominatesPaths entry (blocks ++ [dominated]) entryIsFirst extendedPath
+    simp only [List.mem_append, List.mem_singleton] at dominatorMem
+    rcases dominatorMem with dominatorMem | dominatorEqDominated
+    · exact dominatorMem
+    · exact False.elim (dominatorNeDominated dominatorEqDominated)
+
+end BlockPtr.ProperlyDominatesInSSACFGRegion
 
 end Veir
