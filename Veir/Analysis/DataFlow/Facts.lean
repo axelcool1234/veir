@@ -3,6 +3,7 @@ module
 public import Veir.GlobalOpInfo
 public import Veir.Analysis.DataFlow.Domains.IntegerRangeDomain
 public import Veir.Analysis.DataFlow.Domains.LivenessDomain
+public import Veir.Analysis.DataFlow.Domains.DominanceDomain
 public import Veir.Rewriter.InsertPoint
 public import Veir.Analysis.DataFlow.Domains.ConstantDomain
 
@@ -129,19 +130,20 @@ def dequeue? (workList : WorkList) : Option (WorkItem × WorkList) := do
 
 end WorkList
 
+/-- Fixed CFG information used to solve dominance for one region. -/
+structure RegionDominanceMetadata where
+  reversePostOrder : Array BlockPtr := #[]
+  blockIndex : HashMap BlockPtr Nat := {}
+  predecessors : Array (Array Nat) := #[]
+
 /--
-Represents the dominance information for all reachable blocks in a region as
-dense reverse postorder indexed arrays. The predecessor indices support the
-analysis's iterative updates; `immediateDominators` is the resulting abstract
-value exposed to clients.
+The dominance abstract value and its fixed, region-specific CFG metadata.
 
 Stored in the entry block of each region.
 -/
 structure RegionDominancePayload where
-  reversePostOrder : Array BlockPtr := #[]
-  blockIndex : HashMap BlockPtr Nat := {}
-  predecessors : Array (Array Nat) := #[]
-  immediateDominators : Array Nat := #[]
+  metadata : RegionDominanceMetadata := {}
+  latticeElement : DominanceValue metadata.reversePostOrder.size := ⊤
 
 /-- A sparse dataflow fact payload with analysis specific metadata. -/
 structure SparsePayload (Domain : Type) (Metadata : Type := Unit) where
@@ -218,20 +220,24 @@ def enqueueDependents (fact : Fact kind) (workList : WorkList) : WorkList :=
     workList
 
 def reversePostOrder (fact : Fact .regionDominance) : Array BlockPtr :=
-  fact.payload.reversePostOrder
+  fact.payload.metadata.reversePostOrder
 
 def blockIndex (fact : Fact .regionDominance) : HashMap BlockPtr Nat :=
-  fact.payload.blockIndex
+  fact.payload.metadata.blockIndex
 
 def predecessors (fact : Fact .regionDominance) : Array (Array Nat) :=
-  fact.payload.predecessors
+  fact.payload.metadata.predecessors
 
-def immediateDominators (fact : Fact .regionDominance) : Array Nat :=
-  fact.payload.immediateDominators
+def dominanceValue (fact : Fact .regionDominance) :
+    DominanceValue fact.payload.metadata.reversePostOrder.size :=
+  fact.payload.latticeElement
 
-def setImmediateDominators (fact : Fact .regionDominance)
-    (immediateDominators : Array Nat) : Fact .regionDominance :=
-  { fact with payload := { fact.payload with immediateDominators } }
+def setLatticeElement (fact : Fact .regionDominance)
+    (latticeElement : DominanceValue blockCount) : Fact .regionDominance :=
+  if h : blockCount = fact.payload.metadata.reversePostOrder.size then
+    { fact with payload := { fact.payload with latticeElement := h ▸ latticeElement } }
+  else
+    fact
 
 def live (fact : Fact .liveness) : Bool :=
   match fact.payload.latticeElement with
