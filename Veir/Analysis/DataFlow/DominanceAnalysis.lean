@@ -71,7 +71,7 @@ def isReachable [FactSpec .regionDominance]
     | return false
   let some index := dominance.blockIndex.get? block
     | return false
-  return decide (dominance.immediateDominators[index]! < dominance.immediateDominators.size)
+  return dominance.dominanceValue.get? index |>.isSome
 
 end BlockPtr
 
@@ -160,12 +160,13 @@ private def initializeRegion
     blockIndex := blockIndex.insert block index
     index := index + 1
   let predecessors := collectPredecessors reversePostOrder blockIndex irCtx
-  let mut immediateDominators := Array.replicate reversePostOrder.size reversePostOrder.size
-  immediateDominators := immediateDominators.set! 0 0
+  let mut latticeElement : DominanceValue reversePostOrder.size := ⊤
+  latticeElement := latticeElement.refine! 0 0
   dfCtx :=
     dfCtx.modifyFactAndPropagate .regionDominance (.BlockPtr entry) (fun fact =>
       ({ fact with payload :=
-          { reversePostOrder, blockIndex, predecessors, immediateDominators } }, true)) irCtx
+          { metadata := { reversePostOrder, blockIndex, predecessors }
+            latticeElement } }, true)) irCtx
   dfCtx.enqueue (InsertPoint.atStart! entry irCtx.raw, kind)
 
 /-- Recursively initialize the analysis on nested regions. -/
@@ -195,14 +196,14 @@ until both fingers coincide.
 -/
 private def intersect
     (index1 index2 : Nat)
-    (immediateDominators : Array Nat) : Nat := Id.run do
+    (latticeElement : DominanceValue blockCount) : Nat := Id.run do
   let mut finger1 := index1
   let mut finger2 := index2
   while finger1 ≠ finger2 do
     while finger1 > finger2 do
-      finger1 := immediateDominators[finger1]!
+      finger1 := latticeElement.get! finger1
     while finger2 > finger1 do
-      finger2 := immediateDominators[finger2]!
+      finger2 := latticeElement.get! finger2
   finger1
 
 /--
@@ -218,7 +219,7 @@ its first immediate dominator value, in which case the region needs another swee
 private def computeImmediateDominator
     (blockIndex : Nat)
     (predecessors : Array (Array Nat))
-    (immediateDominators : Array Nat) : Option Nat × Bool := Id.run do
+    (latticeElement : DominanceValue blockCount) : Option Nat × Bool := Id.run do
   if blockIndex = 0 then
     return (some 0, false)
 
@@ -226,13 +227,13 @@ private def computeImmediateDominator
   let mut waiting := false -- Waiting for reachable predecessor
 
   for predIndex in predecessors[blockIndex]! do
-    if immediateDominators[predIndex]! = immediateDominators.size then
+    if latticeElement.get! predIndex = blockCount then
       waiting := true
       continue
     newIDomIndex :=
       match newIDomIndex with
       | none => predIndex
-      | some idomIndex => intersect predIndex idomIndex immediateDominators
+      | some idomIndex => intersect predIndex idomIndex latticeElement
 
   (newIDomIndex, waiting)
 
@@ -254,25 +255,26 @@ def visit
   let some dominance := region.getRegionDominanceFact? dfCtx irCtx
     | return dfCtx
   let mut dfCtx := dfCtx
-  let mut immediateDominators := dominance.immediateDominators
-  let mut immediateDominatorsChanged := false
+  let mut latticeElement := dominance.dominanceValue
+  let mut latticeElementChanged := false
   let mut needsSweep := false
   for blockIndex in [:dominance.reversePostOrder.size] do
     let (newIDomIndex?, waiting) :=
-      computeImmediateDominator blockIndex dominance.predecessors immediateDominators
+      computeImmediateDominator blockIndex dominance.predecessors latticeElement
     needsSweep := needsSweep || waiting
     if let some newIDomIndex := newIDomIndex? then
-      let oldIDomIndex := immediateDominators[blockIndex]!
-      if oldIDomIndex ≠ newIDomIndex then
+      let oldIDomIndex := latticeElement.get! blockIndex
+      let refinedIDomIndex := min oldIDomIndex newIDomIndex
+      if oldIDomIndex ≠ refinedIDomIndex then
         -- Initializing a fact cannot invalidate an earlier chain traversal: no
         -- traversal can pass through a block before that block has an iDom.
         -- A refinement of an existing fact can, so it requires another sweep.
-        needsSweep := needsSweep || oldIDomIndex ≠ immediateDominators.size
-        immediateDominatorsChanged := true
-        immediateDominators := immediateDominators.set! blockIndex newIDomIndex
-  if immediateDominatorsChanged then
+        needsSweep := needsSweep || oldIDomIndex ≠ dominance.reversePostOrder.size
+        latticeElementChanged := true
+        latticeElement := latticeElement.refine! blockIndex newIDomIndex
+  if latticeElementChanged then
     dfCtx := dfCtx.modifyFactAndPropagate .regionDominance (.BlockPtr entry) (fun fact =>
-      (fact.setImmediateDominators immediateDominators, true)) irCtx
+      (fact.setLatticeElement latticeElement, true)) irCtx
   if needsSweep then
     dfCtx := dfCtx.enqueue (InsertPoint.atStart! entry irCtx.raw, kind)
   dfCtx
