@@ -139,6 +139,26 @@ theorem split_of_mem
         exists source :: pre, post
         grind [.Cons]
 
+/-- A path is either a singleton or consists of a shorter path followed by its final edge. -/
+theorem eq_single_or_exists_unsnoc
+    (path : region.Path ctx source target blocks) :
+    (source = target ∧ blocks = [source]) ∨
+      ∃ predecessor prefixBlocks,
+        region.Path ctx source predecessor prefixBlocks ∧
+          target ∈ predecessor.getSuccessors! ctx.raw ∧
+          blocks = prefixBlocks ++ [target] := by
+  induction path with
+  | Single parent => exact Or.inl ⟨rfl, rfl⟩
+  | @Cons source next target blocks parent successor tail ih =>
+      rcases ih with ⟨nextEq, blocksEq⟩ |
+        ⟨predecessor, prefixBlocks, prefixPath, edge, blocksEq⟩
+      · subst target
+        subst blocks
+        exact Or.inr ⟨source, [source], .Single parent, successor, rfl⟩
+      · refine Or.inr ⟨predecessor, source :: prefixBlocks, ?_, edge, ?_⟩
+        · exact .Cons parent successor prefixPath
+        · simp only [blocksEq, List.cons_append]
+
 end RegionPtr.Path
 
 namespace BlockPtr.ReachableFromEntry
@@ -189,5 +209,61 @@ theorem successor
   exact RegionPtr.Path.append path edgePath
 
 end BlockPtr.ReachableFromEntry
+
+namespace BlockPtr.ProperlyDominatesInSSACFGRegion
+
+variable {region : RegionPtr}
+variable {dominator dominated predecessor : BlockPtr}
+
+/-- A proper dominator is distinct from the block it dominates. -/
+theorem ne
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx) :
+    dominator ≠ dominated := by
+  rcases dominance with ⟨_, _, _, hne, _⟩
+  exact hne
+
+/-- A proper dominator occurs on every path from the region entry to the dominated block. -/
+theorem mem_of_entry_path
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx)
+    (entryIsFirst : (region.get! ctx.raw).firstBlock = some entry)
+    (path : region.Path ctx entry dominated blocks) :
+    dominator ∈ blocks := by
+  rcases dominance with ⟨_, _, _, _, dominatesPaths⟩
+  exact dominatesPaths entry blocks entryIsFirst path
+
+/-- The entry block of an SSACFG region has no proper dominator. -/
+theorem false_of_dominated_is_entry
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx)
+    (entryIsFirst : (region.get! ctx.raw).firstBlock = some dominated) : False := by
+  rcases dominance with
+    ⟨_, dominatedParent, _, dominatorNeDominated, dominatesPaths⟩
+  have dominatorMem := dominatesPaths dominated [dominated] entryIsFirst (.Single dominatedParent)
+  simp only [List.mem_singleton] at dominatorMem
+  exact dominatorNeDominated dominatorMem
+
+/-- A proper dominator of a block dominates each predecessor of that block. -/
+theorem dominates_predecessor
+    (dominance : dominator.ProperlyDominatesInSSACFGRegion dominated region ctx)
+    (predecessorParent : (predecessor.get! ctx.raw).parent = some region)
+    (successor : dominated ∈ predecessor.getSuccessors! ctx.raw) :
+    dominator.DominatesInSSACFGRegion predecessor region ctx := by
+  rcases dominance with
+    ⟨dominatorParent, dominatedParent, ssa, dominatorNeDominated, dominatesPaths⟩
+  by_cases dominatorEqPredecessor : dominator = predecessor
+  · exact Or.inl dominatorEqPredecessor
+  · right
+    refine ⟨dominatorParent, predecessorParent, ssa, dominatorEqPredecessor, ?_⟩
+    intro entry blocks entryIsFirst path
+    have edgePath : region.Path ctx predecessor dominated [predecessor, dominated] :=
+      .Cons predecessorParent successor (.Single dominatedParent)
+    have extendedPath : region.Path ctx entry dominated (blocks ++ [dominated]) := by
+      simpa using RegionPtr.Path.append path edgePath
+    have dominatorMem := dominatesPaths entry (blocks ++ [dominated]) entryIsFirst extendedPath
+    simp only [List.mem_append, List.mem_singleton] at dominatorMem
+    rcases dominatorMem with dominatorMem | dominatorEqDominated
+    · exact dominatorMem
+    · exact False.elim (dominatorNeDominated dominatorEqDominated)
+
+end BlockPtr.ProperlyDominatesInSSACFGRegion
 
 end Veir

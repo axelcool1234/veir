@@ -165,7 +165,7 @@ namespace BlockPtr
 Immediate dominator for the block entry, if the dominance analysis has
 initialized this block's region.
 -/
-def immediateDominator?
+@[expose] def immediateDominator?
     [FactSpec .regionDominance]
     (block : BlockPtr)
     (dfCtx : DataFlowContext)

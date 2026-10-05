@@ -99,51 +99,131 @@ def kind : AnalysisKind :=
 /--
 The returned array is the CFG in postorder.
 -/
-private def collectPostOrder
+@[expose] def collectPostOrder
     (region : RegionPtr)
     (irCtx : WfIRContext OpCode) : Array BlockPtr := Id.run do
   let mut postOrder : Array BlockPtr := #[]
   let some entry := (region.get! irCtx.raw).firstBlock
     | return postOrder
-  let mut stack : Array (BlockPtr × Bool) := #[(entry, false)]
+  let mut stack : List (BlockPtr × Nat) := [(entry, 0)]
   let mut seen : HashSet BlockPtr := ∅
+  seen := seen.insert entry
 
   while !stack.isEmpty do
-    let (block, visited) := stack.back!
-    stack := stack.pop
-
-    if visited then
-      postOrder := postOrder.push block
-    else if seen.contains block then
-      continue
+    let (block, successorIndex) := stack.head!
+    let successors := block.getSuccessors! irCtx.raw
+    if h : successorIndex < successors.size then
+      stack := (block, successorIndex + 1) :: stack.tail
+      let successor := successors[successorIndex]
+      if !seen.contains successor then
+        seen := seen.insert successor
+        stack := (successor, 0) :: stack
     else
-      seen := seen.insert block
-      stack := stack.push (block, true)
-
-      if let some terminator := (block.get! irCtx.raw).lastOp then
-        for succ in terminator.getSuccessors! irCtx.raw do
-          if !seen.contains succ then
-            stack := stack.push (succ, false)
+      stack := stack.tail
+      postOrder := postOrder.push block
   postOrder
 
+/-- Add one represented block's outgoing edges to the predecessor table. -/
+@[expose, inline] def addPredecessorEdges
+    (predecessors : Array (Array Nat))
+    (predecessorIndex : Nat)
+    (successors : Array BlockPtr)
+    (blockIndex : HashMap BlockPtr Nat) : Array (Array Nat) := Id.run do
+  let mut predecessors := predecessors
+  for block in successors do
+    let some index := blockIndex.get? block
+      | continue
+    predecessors := predecessors.modify index fun indices =>
+      indices.push predecessorIndex
+  predecessors
+
 /-- Cache reachable predecessor indices once, outside the iterative solver. -/
-private def collectPredecessors
+@[expose] def collectPredecessors
     (reversePostOrder : Array BlockPtr)
     (blockIndex : HashMap BlockPtr Nat)
     (irCtx : WfIRContext OpCode) : Array (Array Nat) := Id.run do
-  let mut predecessors := #[]
-  for block in reversePostOrder do
-    let mut preds := #[]
-    let mut currentUse := (block.get! irCtx.raw).firstUse
-    while let some predUse := currentUse do
-      let use := predUse.get! irCtx.raw
-      currentUse := use.nextUse
-      let some predBlock := (use.owner.get! irCtx.raw).parent
-        | continue
-      if let some index := blockIndex.get? predBlock then
-        preds := preds.push index
-    predecessors := predecessors.push preds
+  let mut predecessors := Array.replicate reversePostOrder.size #[]
+  for h : predecessorIndex in [:reversePostOrder.size] do
+    let predecessor := reversePostOrder[predecessorIndex]
+    predecessors := addPredecessorEdges predecessors predecessorIndex
+      (predecessor.getSuccessors! irCtx.raw) blockIndex
   predecessors
+
+/-- Build the inverse map from reachable blocks to their dense RPO indices. -/
+@[expose] def buildBlockIndex
+    (reversePostOrder : Array BlockPtr) : HashMap BlockPtr Nat := Id.run do
+  let mut blockIndex : HashMap BlockPtr Nat := {}
+  for h : index in [:reversePostOrder.size] do
+    blockIndex := blockIndex.insert reversePostOrder[index] index
+  blockIndex
+
+/-- Collect all fixed dominance metadata for a region. -/
+@[expose] def collectMetadata
+    (region : RegionPtr)
+    (irCtx : WfIRContext OpCode) : RegionDominanceMetadata :=
+  let reversePostOrder := (collectPostOrder region irCtx).reverse
+  let blockIndex := buildBlockIndex reversePostOrder
+  let predecessors := collectPredecessors reversePostOrder blockIndex irCtx
+  { reversePostOrder, blockIndex, predecessors }
+
+/-- Build a temporary hash index of represented CFG edges for metadata validation. -/
+@[expose] def collectEdges
+    (metadata : RegionDominanceMetadata)
+    (irCtx : WfIRContext OpCode) : HashSet (BlockPtr × BlockPtr) :=
+  HashSet.ofList <| metadata.reversePostOrder.toList.flatMap fun predecessor =>
+    (predecessor.getSuccessors! irCtx.raw).toList.map fun block => (predecessor, block)
+
+/-- Check that one cached predecessor index denotes an actual CFG edge. -/
+@[expose] def predecessorIndexIsValid
+    (metadata : RegionDominanceMetadata)
+    (region : RegionPtr)
+    (irCtx : WfIRContext OpCode)
+    (edges : HashSet (BlockPtr × BlockPtr))
+    (blockIndex predecessorIndex : Nat) : Bool :=
+  match metadata.reversePostOrder[blockIndex]?,
+      metadata.reversePostOrder[predecessorIndex]? with
+  | some block, some predecessor =>
+    decide ((predecessor.get! irCtx.raw).parent = some region) &&
+      metadata.blockIndex.get? predecessor = some predecessorIndex &&
+      edges.contains (predecessor, block)
+  | _, _ => false
+
+/--
+Check the fixed structural metadata consumed by the CHK solver.
+
+The check is deliberately independent of the mutable dominance value. Besides
+certifying the cached predecessor edges, it establishes that the RPO array is
+injective (through its inverse map) and that every non-entry block has an
+earlier predecessor. The latter is the only ordering property required by the
+semantic proof.
+-/
+@[expose] def metadataIsValid
+    (metadata : RegionDominanceMetadata)
+    (region : RegionPtr)
+    (irCtx : WfIRContext OpCode) : Bool :=
+  match (region.get! irCtx.raw).firstBlock, metadata.reversePostOrder[0]? with
+  | some entry, some firstBlock =>
+    let edges := collectEdges metadata irCtx
+    entry = firstBlock &&
+      metadata.predecessors.size = metadata.reversePostOrder.size &&
+      (List.range metadata.reversePostOrder.size).all fun blockIndex =>
+        let block := metadata.reversePostOrder[blockIndex]!
+        (block.get! irCtx.raw).parent = some region &&
+          metadata.blockIndex.get? block = some blockIndex &&
+          (metadata.predecessors[blockIndex]!.all fun predecessorIndex =>
+            predecessorIndexIsValid metadata region irCtx edges
+              blockIndex predecessorIndex) &&
+          (blockIndex = 0 ||
+            metadata.predecessors[blockIndex]!.any fun predecessorIndex =>
+              predecessorIndex < blockIndex)
+  | _, _ => false
+
+/-- Collect metadata and retain it only when its solver contract is certified. -/
+@[expose] def collectMetadata?
+    (region : RegionPtr)
+    (irCtx : WfIRContext OpCode) : Option RegionDominanceMetadata :=
+  let metadata := collectMetadata region irCtx
+  if metadataIsValid metadata region irCtx then some metadata else none
 
 /-- Initialize a region dominance fact and enqueue its first reverse postorder sweep. -/
 private def initializeRegion
@@ -153,20 +233,13 @@ private def initializeRegion
   let mut dfCtx := dfCtx
   let some entry := (region.get! irCtx.raw).firstBlock
     | return dfCtx
-  let reversePostOrder := (collectPostOrder region irCtx).reverse
-  let mut blockIndex : HashMap BlockPtr Nat := {}
-  let mut index := 0
-  for block in reversePostOrder do
-    blockIndex := blockIndex.insert block index
-    index := index + 1
-  let predecessors := collectPredecessors reversePostOrder blockIndex irCtx
-  let mut latticeElement : DominanceValue reversePostOrder.size := ⊤
-  latticeElement := latticeElement.refine! 0 0
+  let some metadata := collectMetadata? region irCtx
+    | return dfCtx
+  let latticeElement := DominanceValue.initial metadata.reversePostOrder.size
   dfCtx :=
     dfCtx.modifyFactAndPropagate .regionDominance (.BlockPtr entry) (fun fact =>
       ({ fact with payload :=
-          { metadata := { reversePostOrder, blockIndex, predecessors }
-            latticeElement } }, true)) irCtx
+          { metadata, latticeElement } }, true)) irCtx
   dfCtx.enqueue (InsertPoint.atStart! entry irCtx.raw, kind)
 
 /-- Recursively initialize the analysis on nested regions. -/
@@ -188,23 +261,19 @@ partial def init
       currentBlock := (block.get! irCtx.raw).next
 
   dfCtx
-/--
-Find the nearest common dominator of two reverse postorder indices.
-
-On each step, the finger with the larger reverse postorder index is moved upward
-until both fingers coincide.
--/
-private def intersect
-    (index1 index2 : Nat)
-    (latticeElement : DominanceValue blockCount) : Nat := Id.run do
-  let mut finger1 := index1
-  let mut finger2 := index2
-  while finger1 ≠ finger2 do
-    while finger1 > finger2 do
-      finger1 := latticeElement.get! finger1
-    while finger2 > finger1 do
-      finger2 := latticeElement.get! finger2
-  finger1
+/-- Incorporate one predecessor into the current CHK candidate and waiting flag. -/
+@[expose]
+def predecessorStep
+    (latticeElement : DominanceValue blockCount)
+    (state : Option Nat × Bool)
+    (predecessorIndex : Nat) : Option Nat × Bool :=
+  if latticeElement.get! predecessorIndex = blockCount then
+    (state.1, true)
+  else
+    (some (match state.1 with
+      | none => predecessorIndex
+      | some immediateDominatorIndex =>
+          latticeElement.intersect predecessorIndex immediateDominatorIndex), state.2)
 
 /--
 Compute the next immediate dominator candidate for `block`.
@@ -216,26 +285,48 @@ repeatedly `intersect` that candidate with each other processed predecessor.
 The boolean result reports whether a reachable predecessor is still waiting for
 its first immediate dominator value, in which case the region needs another sweep.
 -/
-private def computeImmediateDominator
+@[expose]
+def computeImmediateDominator
     (blockIndex : Nat)
     (predecessors : Array (Array Nat))
-    (latticeElement : DominanceValue blockCount) : Option Nat × Bool := Id.run do
+    (latticeElement : DominanceValue blockCount) : Option Nat × Bool :=
   if blockIndex = 0 then
-    return (some 0, false)
+    (some 0, false)
+  else
+    predecessors[blockIndex]!.foldl (predecessorStep latticeElement) (none, false)
 
-  let mut newIDomIndex : Option Nat := none
-  let mut waiting := false -- Waiting for reachable predecessor
+/-- The mutable state produced by one complete CHK reverse-postorder sweep. -/
+structure SweepResult (blockCount : Nat) where
+  latticeElement : DominanceValue blockCount
+  latticeElementChanged : Bool
+  needsSweep : Bool
 
-  for predIndex in predecessors[blockIndex]! do
-    if latticeElement.get! predIndex = blockCount then
-      waiting := true
-      continue
-    newIDomIndex :=
-      match newIDomIndex with
-      | none => predIndex
-      | some idomIndex => intersect predIndex idomIndex latticeElement
-
-  (newIDomIndex, waiting)
+/-- Run one complete CHK reverse-postorder sweep over the dense region value. -/
+@[expose] def sweep
+    (predecessors : Array (Array Nat))
+    (initialValue : DominanceValue blockCount) : SweepResult blockCount := Id.run do
+  let mut latticeElement := initialValue
+  let mut latticeElementChanged := false
+  let mut needsSweep := false
+  -- Index zero is the entry block, whose immediate dominator is fixed at zero.
+  for blockIndex in [1:blockCount] do
+    let (newIDomIndex?, waiting) :=
+      computeImmediateDominator blockIndex predecessors latticeElement
+    needsSweep := needsSweep || waiting
+    if let some newIDomIndex := newIDomIndex? then
+      let oldIDomIndex := latticeElement.get! blockIndex
+      let refinedIDomIndex := min oldIDomIndex newIDomIndex
+      -- Once initialized, a block is stable only when its stored parent is
+      -- exactly the freshly computed CHK candidate.
+      needsSweep := needsSweep ||
+        (oldIDomIndex ≠ blockCount && oldIDomIndex ≠ newIDomIndex)
+      if oldIDomIndex ≠ refinedIDomIndex then
+        -- Initializing a fact cannot invalidate an earlier chain traversal: no
+        -- traversal can pass through a block before that block has an iDom.
+        -- A refinement of an existing fact can, so it requires another sweep.
+        latticeElementChanged := true
+        latticeElement := latticeElement.refine! blockIndex newIDomIndex
+  return { latticeElement, latticeElementChanged, needsSweep }
 
 /--
 Perform one complete Cooper-Harvey-Kennedy reverse postorder sweep.
@@ -255,27 +346,11 @@ def visit
   let some dominance := region.getRegionDominanceFact? dfCtx irCtx
     | return dfCtx
   let mut dfCtx := dfCtx
-  let mut latticeElement := dominance.dominanceValue
-  let mut latticeElementChanged := false
-  let mut needsSweep := false
-  for blockIndex in [:dominance.reversePostOrder.size] do
-    let (newIDomIndex?, waiting) :=
-      computeImmediateDominator blockIndex dominance.predecessors latticeElement
-    needsSweep := needsSweep || waiting
-    if let some newIDomIndex := newIDomIndex? then
-      let oldIDomIndex := latticeElement.get! blockIndex
-      let refinedIDomIndex := min oldIDomIndex newIDomIndex
-      if oldIDomIndex ≠ refinedIDomIndex then
-        -- Initializing a fact cannot invalidate an earlier chain traversal: no
-        -- traversal can pass through a block before that block has an iDom.
-        -- A refinement of an existing fact can, so it requires another sweep.
-        needsSweep := needsSweep || oldIDomIndex ≠ dominance.reversePostOrder.size
-        latticeElementChanged := true
-        latticeElement := latticeElement.refine! blockIndex newIDomIndex
-  if latticeElementChanged then
+  let sweepResult := sweep dominance.predecessors dominance.dominanceValue
+  if sweepResult.latticeElementChanged then
     dfCtx := dfCtx.modifyFactAndPropagate .regionDominance (.BlockPtr entry) (fun fact =>
-      (fact.setLatticeElement latticeElement, true)) irCtx
-  if needsSweep then
+      (fact.setLatticeElement sweepResult.latticeElement, true)) irCtx
+  if sweepResult.needsSweep then
     dfCtx := dfCtx.enqueue (InsertPoint.atStart! entry irCtx.raw, kind)
   dfCtx
 

@@ -113,6 +113,25 @@ def BlockPtr.ProperlyDominatesInSSACFGRegion (dominator dominated : BlockPtr) (r
     region.Path ctx entry dominated blocks →
     dominator ∈ blocks
 
+/-- Dominance within one SSACFG region, including reflexive dominance. -/
+@[expose] def BlockPtr.DominatesInSSACFGRegion
+    (dominator dominated : BlockPtr) (region : RegionPtr)
+    (ctx : WfIRContext OpInfo) : Prop :=
+  dominator = dominated ∨ dominator.ProperlyDominatesInSSACFGRegion dominated region ctx
+
+/--
+`dominator` is the immediate dominator of `dominated` in an SSACFG region when
+it properly dominates `dominated` and every other proper dominator also
+dominates `dominator`.
+-/
+@[expose] def BlockPtr.ImmediateDominatorInSSACFGRegion
+    (dominator dominated : BlockPtr) (region : RegionPtr)
+    (ctx : WfIRContext OpInfo) : Prop :=
+  dominator.ProperlyDominatesInSSACFGRegion dominated region ctx ∧
+  ∀ other : BlockPtr,
+    other.ProperlyDominatesInSSACFGRegion dominated region ctx →
+    other.DominatesInSSACFGRegion dominator region ctx
+
 /--
 Proper dominance between `dominator` and `dominated` in `region`.
 

@@ -219,16 +219,16 @@ def enqueueDependents (fact : Fact kind) (workList : WorkList) : WorkList :=
       workList := workList.enqueue workItem
     workList
 
-def reversePostOrder (fact : Fact .regionDominance) : Array BlockPtr :=
+@[expose] def reversePostOrder (fact : Fact .regionDominance) : Array BlockPtr :=
   fact.payload.metadata.reversePostOrder
 
-def blockIndex (fact : Fact .regionDominance) : HashMap BlockPtr Nat :=
+@[expose] def blockIndex (fact : Fact .regionDominance) : HashMap BlockPtr Nat :=
   fact.payload.metadata.blockIndex
 
 def predecessors (fact : Fact .regionDominance) : Array (Array Nat) :=
   fact.payload.metadata.predecessors
 
-def dominanceValue (fact : Fact .regionDominance) :
+@[expose] def dominanceValue (fact : Fact .regionDominance) :
     DominanceValue fact.payload.metadata.reversePostOrder.size :=
   fact.payload.latticeElement
 
