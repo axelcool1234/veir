@@ -107,8 +107,6 @@ instance : JoinSemilattice Liveness where
   join_le := join_le
 
 instance : AbstractDomain Liveness Unit where
-  toJoinSemilattice := inferInstance
-  toBoundedOrder := inferInstance
   γ := γ
   γ_top := rfl
   γ_bot := rfl
