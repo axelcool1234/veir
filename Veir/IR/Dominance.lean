@@ -40,7 +40,7 @@ private def BlockPtr.dominatesWithinRegion
     (irCtx : WfIRContext OpCode) : Bool := Id.run do
   if dominator = block then
     return true
-  let some region := (block.get! irCtx.raw).parent
+  let some region := block.getParent! irCtx.raw
     | return false
   let some dominance := region.getRegionDominanceFact? dfCtx irCtx
     | return true
@@ -165,12 +165,12 @@ namespace BlockPtr
 Immediate dominator for the block entry, if the dominance analysis has
 initialized this block's region.
 -/
-def immediateDominator?
+@[expose] def immediateDominator?
     [FactSpec .regionDominance]
     (block : BlockPtr)
     (dfCtx : DataFlowContext)
     (irCtx : WfIRContext OpCode) : Option BlockPtr := do
-  let region ← (block.get! irCtx.raw).parent
+  let region ← block.getParent! irCtx.raw
   let dominance ← region.getRegionDominanceFact? dfCtx irCtx
   let blockIndex ← dominance.blockIndex.get? block
   let immediateDominatorIndex ← dominance.dominanceValue.get? blockIndex
