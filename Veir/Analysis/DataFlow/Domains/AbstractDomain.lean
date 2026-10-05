@@ -82,6 +82,19 @@ instance (priority := low) [Join α] : Max α where
 /-- The join (least upper bound / supremum). -/
 notation:68 lhs:68 " ⊔ " rhs:69 => Join.join lhs rhs
 
+/-- Typeclass for the `⊓` notation. -/
+class Meet (α : Type) where
+  /-- The meet (greatest lower bound / infimum). -/
+  meet : α → α → α
+
+attribute [reducible] Meet.meet
+
+instance (priority := low) [Meet α] : Min α where
+  min := Meet.meet
+
+/-- The meet (greatest lower bound / infimum). -/
+notation:68 lhs:68 " ⊓ " rhs:69 => Meet.meet lhs rhs
+
 /--
 An algebraic definition of a join semilattice.
 -/
@@ -97,14 +110,25 @@ class JoinSemilattice (Domain : Type) [LE Domain]
   join_le (a b c : Domain) : a ≤ c → b ≤ c → a ⊔ b ≤ c
 
 /--
-An abstract domain is a bounded join semilattice equipped 
-with a concretization map.
-
-Each abstract value denotes a set of concrete values via
-concretization.
+An algebraic definition of a meet semilattice.
 -/
-class AbstractDomain (AbstractValue : Type) (ConcreteValue : Type) [LE AbstractValue]
-    extends JoinSemilattice AbstractValue, BoundedOrder AbstractValue where
+class MeetSemilattice (Domain : Type) [LE Domain]
+  extends Std.IsPartialOrder Domain, Meet Domain where
+  /-- The meet is a lower bound on the first argument. -/
+  meet_le_left (a b : Domain) : a ⊓ b ≤ a
+
+  /-- The meet is a lower bound on the second argument. -/
+  meet_le_right (a b : Domain) : a ⊓ b ≤ b
+
+  /-- The meet is the greatest lower bound. -/
+  le_meet (a b c : Domain) : c ≤ a → c ≤ b → c ≤ a ⊓ b
+
+/--
+An abstract domain is a bounded ordered type equipped with a concretization map.
+Each abstract value denotes a set of concrete values via concretization.
+-/
+class AbstractDomain (AbstractValue : Type) (ConcreteValue : Type)
+    [LE AbstractValue] [Std.IsPartialOrder AbstractValue] [BoundedOrder AbstractValue] where
   /--
   Concretization. Given an abstract value, returns the set of concrete values it
   denotes.

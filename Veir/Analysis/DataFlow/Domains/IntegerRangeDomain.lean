@@ -203,8 +203,6 @@ instance : JoinSemilattice IntegerRangeLattice where
   join_le := join_le
 
 instance : AbstractDomain IntegerRangeLattice Int where
-  toJoinSemilattice := inferInstance
-  toBoundedOrder := inferInstance
   γ := γ
   γ_top := rfl
   γ_bot := rfl
