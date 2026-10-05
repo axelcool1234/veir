@@ -51,8 +51,8 @@ private def BlockPtr.dominatesWithinRegion
     | return false
   let mut currentIndex := blockIndex
   while currentIndex ≠ dominatorIndex do
-    let immediateDominator := dominance.immediateDominators[currentIndex]!
-    if immediateDominator ≥ dominance.immediateDominators.size ||
+    let immediateDominator := dominance.dominanceValue.get! currentIndex
+    if immediateDominator ≥ dominance.reversePostOrder.size ||
         immediateDominator = currentIndex then
       return false
     currentIndex := immediateDominator
@@ -203,7 +203,7 @@ def immediateDominator?
   let region ← block.getParent! irCtx.raw
   let dominance ← region.getRegionDominanceFact? dfCtx irCtx
   let blockIndex ← dominance.blockIndex.get? block
-  let immediateDominatorIndex := dominance.immediateDominators[blockIndex]!
+  let immediateDominatorIndex ← dominance.dominanceValue.get? blockIndex
   dominance.reversePostOrder[immediateDominatorIndex]?
 
 /--
