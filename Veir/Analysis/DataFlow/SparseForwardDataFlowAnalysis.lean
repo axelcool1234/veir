@@ -26,6 +26,14 @@ that result.
 abbrev TransferFn (Domain : Type) :=
   OperationPtr -> Array Domain -> WfIRContext OpCode -> Array Domain
 
+def TransferSound {Abstract Concrete : Type} [Domain : AbstractDomain Abstract Concrete] (transfer : Array Domain → Array Domain) :
+    ∀ a : Array Abstract, ∀ c : Array Concrete,
+      c.size = a.size → ∀ i, i < c.size →
+        c[i] ∈ γ a[i] → interpOp' c[i] ∈ γ (transfer a[i]) → Prop := 
+    sorry
+
+--∀ a : Array Domain, ∀ c : Array Concrete → c.size = a.size → ∀ i, i < c.size → c[i] 
+
 /-- Compute the analysis specific entry state when control flow loses precision. -/
 abbrev EntryStateFn (Domain : Type) :=
   ValuePtr -> WfIRContext OpCode -> Domain
