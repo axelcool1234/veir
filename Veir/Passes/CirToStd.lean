@@ -356,7 +356,7 @@ public def CirToStdPass : Pass OpCode :=
     description := "Lower the cir dialect's integer core to the arith, cf and llvm dialects."
     options := .ofList [
       ("strict", { description := "Fail if a cir operation other than cir.func/cir.return remains.",
-                   defaultValue := true })]
-    run := fun options => CirToStdPass.impl ((options.get? "strict").getD true) }
+                   defaultValue := .bool true })]
+    run := fun options => CirToStdPass.impl ((options.getBool? "strict").getD true) }
 
 end Veir

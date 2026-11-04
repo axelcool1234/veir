@@ -140,7 +140,7 @@ public def CoerceModArithFunctionBoundariesPass : Pass OpCode :=
     run := fun options =>
       CoerceFunctionBoundariesPass.impl
         (.modArithToInt
-          (if (options.get? "pow2-width").getD false then Nat.nextPowerOfTwo else id)) }
+          (if (options.getBool? "pow2-width").getD false then Nat.nextPowerOfTwo else id)) }
 
 public def CoerceCirFunctionBoundariesPass : Pass OpCode :=
   { name := "coerce-cir-function-boundaries"

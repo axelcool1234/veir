@@ -114,22 +114,22 @@ def CanonicalizePass.impl (options : PassOptions) (ctx : WfIRContext OpCode)
     ExceptT String IO (WfIRContext OpCode) := do
   let mut ctx := ctx
   let mut patterns : Array (RewritePattern OpCode) := #[]
-  if (options.get? "sccp").getD true then
+  if (options.getBool? "sccp").getD true then
     let some propagated := propagateConstants ctx op
       | throw "Error while propagating constants"
     ctx := propagated
     patterns := patterns.push foldOperation
-  if (options.get? "constant-branch").getD true then
+  if (options.getBool? "constant-branch").getD true then
     patterns := patterns.push simplifyConstantBranch
-  if (options.get? "mod-arith-constant").getD true then
+  if (options.getBool? "mod-arith-constant").getD true then
     patterns := patterns.push canonicalizeModArithConstant
-  if (options.get? "commutative-constant-rhs").getD true then
+  if (options.getBool? "commutative-constant-rhs").getD true then
     patterns := patterns.push commutativeConstantRHS
   let pattern := RewritePattern.GreedyRewritePattern patterns
   let some result := RewritePattern.applyInContext pattern ctx
     | throw "Error while applying canonicalization patterns"
   ctx := result
-  if (options.get? "unique-constants").getD true then
+  if (options.getBool? "unique-constants").getD true then
     ctx := UniqueConstants.run ctx op
   return ctx
 
@@ -139,19 +139,19 @@ public def CanonicalizePass : Pass OpCode :=
     options := .ofList [
       ("sccp",
         { description := "Propagate constants, then fold operations to constants or operands."
-          defaultValue := true }),
+          defaultValue := .bool true }),
       ("constant-branch",
         { description := "Replace branches with constant conditions by unconditional branches."
-          defaultValue := true }),
+          defaultValue := .bool true }),
       ("mod-arith-constant",
         { description := "Reduce modular constants to their canonical representatives."
-          defaultValue := true }),
+          defaultValue := .bool true }),
       ("unique-constants",
         { description := "Deduplicate constants and hoist them to the top of their isolated scope."
-          defaultValue := true }),
+          defaultValue := .bool true }),
       ("commutative-constant-rhs",
         { description := "Move constants to the right side of commutative operations."
-          defaultValue := true })]
+          defaultValue := .bool true })]
     run := CanonicalizePass.impl }
 
 end Veir

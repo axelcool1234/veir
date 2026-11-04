@@ -41,7 +41,7 @@ def ApplyPatternsPass.impl (options : PassOptions) (ctx : WfIRContext OpCode)
     (op : OperationPtr) (_ : op.InBounds ctx.raw) :
     ExceptT String IO (WfIRContext OpCode) := do
   let patterns := applyPatterns.foldl (init := #[]) fun selected (name, pattern) =>
-    if (options.get? name).getD false then selected.push pattern else selected
+    if (options.getBool? name).getD false then selected.push pattern else selected
   let pattern := RewritePattern.GreedyRewritePattern patterns
   match RewritePattern.applyInContext pattern ctx with
   | none => throw "Error while applying pattern rewrites"

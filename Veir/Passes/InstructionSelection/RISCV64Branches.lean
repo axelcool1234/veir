@@ -300,5 +300,5 @@ public def IselBrRISCV64 : Pass OpCode :=
       "Select gMIR branch instructions for RISCV 64."
     options := .ofList [
       ("strict", { description := "Fail if not all branches could be lowered.",
-                   defaultValue := true })]
-    run := fun options => ISelBrPass.impl ((options.get? "strict").getD true) }
+                   defaultValue := .bool true })]
+    run := fun options => ISelBrPass.impl ((options.getBool? "strict").getD true) }

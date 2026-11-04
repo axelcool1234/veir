@@ -33,9 +33,9 @@ def PrintDataFlowPass : Pass OpCode :=
         { description := "Print ModArith range-analysis facts." }
     run := fun options ctx op _ => do
       let mut analyses := #[]
-      if options.getD "sccp" false then
+      if (options.getBool? "sccp").getD false then
         analyses := analyses ++ #[SparseConstantPropagationAnalysis, DeadCodeAnalysis]
-      if options.getD "mod-arith-ranges" false then
+      if (options.getBool? "mod-arith-ranges").getD false then
         analyses := analyses.push ModArithRangeAnalysis
       if analyses.isEmpty then
         throw "select at least one analysis (sccp or mod-arith-ranges)"

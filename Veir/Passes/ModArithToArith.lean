@@ -349,7 +349,7 @@ public def ModArithToArithPass : Pass OpCode :=
       ("pow2-width", { description := "Use power-of-two bitwidths for the lowered integer types." })]
     run := fun options =>
       ModArithToArithPass.impl
-        (if (options.get? "pow2-width").getD false then Nat.nextPowerOfTwo else id)
-        (if (options.get? "barrett").getD false then .barrett else .full) }
+        (if (options.getBool? "pow2-width").getD false then Nat.nextPowerOfTwo else id)
+        (if (options.getBool? "barrett").getD false then .barrett else .full) }
 
 end Veir

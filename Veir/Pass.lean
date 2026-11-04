@@ -13,15 +13,31 @@ namespace Veir
 
 public section
 
-/-- The declaration of a boolean pass option. -/
-structure BoolPassOption where
+/-- A value accepted by a pass option. -/
+inductive PassOptionValue where
+  | bool (value : Bool)
+  | nat (value : Nat)
+deriving BEq, Repr
+
+/-- The declaration of a pass option, including its type and default value. -/
+structure PassOption where
   /-- Human-readable help text for the option. -/
   description : String
   /-- The option's default value. -/
-  defaultValue : Bool := false
+  defaultValue : PassOptionValue := .bool false
 
-/-- The boolean option values for one instance of a pass. -/
-abbrev PassOptions := Std.HashMap String Bool
+/-- The option values for one instance of a pass. -/
+abbrev PassOptions := Std.HashMap String PassOptionValue
+
+/-- Return a boolean option value, or `none` if the option is absent or has another type. -/
+def PassOptions.getBool? (options : PassOptions) (name : String) : Option Bool := do
+  let .bool value ← options.get? name | none
+  return value
+
+/-- Return a natural number option value, or `none` if it is absent or has another type. -/
+def PassOptions.getNat? (options : PassOptions) (name : String) : Option Nat := do
+  let .nat value ← options.get? name | none
+  return value
 
 /-- A compilation pass. -/
 structure Pass (OpInfo : Type) [HasOpInfo OpInfo] where
@@ -33,9 +49,9 @@ structure Pass (OpInfo : Type) [HasOpInfo OpInfo] where
   /-- Brief explanation of what the pass does, for documentation and tooling. -/
   description : String
   /--
-    The boolean options this pass accepts, mapping each option name to its declaration.
+    The options this pass accepts, mapping each option name to its declaration.
   -/
-  options : Std.HashMap String BoolPassOption := ∅
+  options : Std.HashMap String PassOption := ∅
   /--
     Execute the pass over the given IR context rooted at `op`, under the options this
     instance of the pass was given.
@@ -49,8 +65,8 @@ structure Pass (OpInfo : Type) [HasOpInfo OpInfo] where
 
 /--
   Check the given option words against the options this pass accepts and return their values.
-  An option word is either `name`, shorthand for `name=true`, or `name=true|false`.
-  Options not named take their declared default value.
+  Boolean options accept `name`, `name=true`, or `name=false`. Natural number options require
+  `name=value`. Options not named take their declared default value.
 -/
 def Pass.parseOptions {OpInfo : Type} [HasOpInfo OpInfo]
     (pass : Pass OpInfo) (flags : List String) : Except String PassOptions := do
@@ -61,16 +77,26 @@ def Pass.parseOptions {OpInfo : Type} [HasOpInfo OpInfo]
     let (name, value?) ← match flag.splitOn "=" with
       | [name] => pure (name, none)
       | [name, value] => pure (name, some value)
-      | _ => throw s!"malformed boolean option '{flag}' for pass '{pass.name}'"
-    unless pass.options.contains name do
-      let known := String.intercalate ", " (pass.options.keys.toArray.qsort (· < ·)).toList
-      let known := if known.isEmpty then "it accepts no options" else s!"it accepts: {known}"
-      throw s!"pass '{pass.name}' has no option '{name}' ({known})"
-    let value ← match value? with
-      | none | some "true" => pure true
-      | some "false" => pure false
-      | some value =>
+      | _ => throw s!"malformed option '{flag}' for pass '{pass.name}'"
+    let some option := pass.options.get? name
+      | let known := String.intercalate ", "
+          (pass.options.keys.toArray.qsort (· < ·)).toList
+        let known := if known.isEmpty then "it accepts no options" else s!"it accepts: {known}"
+        throw s!"pass '{pass.name}' has no option '{name}' ({known})"
+    let value ← match option.defaultValue with
+      | .bool _ => match value? with
+        | none | some "true" => pure (.bool true)
+        | some "false" => pure (.bool false)
+        | some value =>
           throw s!"invalid value '{value}' for boolean option '{name}' of pass '{pass.name}'"
+      | .nat _ =>
+        let some spelling := value?
+          | throw s!"natural number option '{name}' of pass '{pass.name}' requires a value"
+        let some value := spelling.toNat?
+          | let message := s!"invalid value '{spelling}' for natural number option '{name}' " ++
+              s!"of pass '{pass.name}'"
+            throw message
+        pure (.nat value)
     values := values.insert name value
   return values
 
@@ -99,9 +125,8 @@ namespace PassPipeline
 /--
   Parse a comma-separated list of pipeline elements into a `PassPipeline`, looking each
   name up in `registry`. An element is either `name` or `name{option1 option2 ...}`, where the
-  options are accepted boolean options in `name` or `name=true|false` form. Returns an error if
-  a name does not exist in the registry, or if an element requests an option the pass does not
-  accept.
+  boolean options use `name` or `name=true|false`, and natural number options use `name=value`.
+  Returns an error if a name does not exist in the registry or an option is invalid.
 -/
 def ofString? {OpInfo : Type} [HasOpInfo OpInfo]
     (registry : Std.HashMap String (Pass OpInfo)) (s : String) :

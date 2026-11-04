@@ -96,7 +96,9 @@ def passOptionsUsage : String :=
   String.intercalate "\n" (withOptions.flatMap fun pass =>
     s!"    {pass.name}:" ::
       (pass.options.toList.toArray.qsort (·.1 < ·.1)).toList.map fun (name, option) =>
-        let defaultValue := if option.defaultValue then "true" else "false"
+        let defaultValue := match option.defaultValue with
+          | .bool value => if value then "true" else "false"
+          | .nat value => toString value
         s!"      {name} (default: {defaultValue}): {option.description}")
 
 /--
@@ -137,9 +139,9 @@ def expandPassGroups (pipeline : String) : Except String String := do
   Parse the `-p` flags to construct a pass pipeline.
   `-p` takes a comma-separated list of pass names and pass-group names; a group name
   (see `passGroups`) expands in place to its member passes. A pass name may be followed by
-  a brace-enclosed, space-separated list of boolean options, as in
-  `pass{opt1 opt2=false}`. Bare option names mean `true`; omitted options take their declared
-  defaults. The flag may appear any number of times; the resulting pipeline
+  a brace-enclosed, space-separated list of options, as in
+  `pass{opt1 opt2=false count=4}`. Bare boolean option names mean `true`; omitted options take
+  their declared defaults. The flag may appear any number of times; the resulting pipeline
   is the concatenation of their passes, in the order the flags appear on the command line.
   Returns an error if a flag is malformed, if any name is neither a pass nor a group, or if
   a pass is given an option it does not accept.
@@ -230,8 +232,8 @@ def main (args : List String) : IO Unit := do
     IO.eprintln s!"Error: {errMsg}"
     IO.eprintln "Usage: veir-opt <filename> [-p=\"pass1,pass2,...\"]... [--allow-unregistered-dialect] [--disable-verifiers] [--print-op-generic] [--split-input-file[=<marker>]]"
     IO.eprintln "  -p may be repeated; passes run in the order the flags appear."
-    IO.eprintln "  A pass name may be followed by boolean options: pass{opt1 opt2=false}."
-    IO.eprintln "  Bare option names mean true; omitted options take their declared defaults."
+    IO.eprintln "  A pass name may be followed by options: pass{opt1 opt2=false count=4}."
+    IO.eprintln "  Bare boolean names mean true; omitted options take their declared defaults."
     IO.eprintln "  The passes taking options are:"
     IO.eprintln passOptionsUsage
     IO.eprintln "  A pass list may also contain pass-group names, which expand in place:"
